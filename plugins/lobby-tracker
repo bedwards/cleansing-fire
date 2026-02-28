@@ -1,0 +1,803 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Lobbying Disclosure Tracker
+
+Queries the Senate Lobbying Disclosure Act database and OpenSecrets API
+to map lobbying activity: who lobbies whom, for what, and how much they
+spend. Cross-references lobbyists with former government officials
+(revolving door) and with legislative outcomes.
+
+Why this matters:
+  Lobbying is the primary mechanism through which corporate power
+  translates into policy. The data is technically public but scattered
+  across multiple databases in formats designed to be hard to aggregate.
+  This plugin normalizes it, cross-references it, and uses AI to surface
+  the patterns that matter: which industries are buying which policies,
+  which former officials are now selling access, and which bills exist
+  because a lobbyist wrote them.
+
+Data sources:
+  - Senate Lobbying Disclosure (LDA) API: lda.senate.gov
+  - OpenSecrets.org API (requires free API key)
+  - House lobbying disclosure data
+  - ProPublica Congress API (for legislator context)
+
+Plugin manifest:
+  name: lobby-tracker
+  category: osint
+  actions: [search, registrant, client, lobbyist, issue, bill_lobbying,
+            revolving_door, top_spenders, industry]
+  requires_env: [OPENSECRETS_API_KEY]
+  uses_gatekeeper: true
+
+Input JSON:
+  {"action": "search", "query": "artificial intelligence", "year": 2025}
+  {"action": "registrant", "name": "Amazon"}
+  {"action": "client", "name": "Meta Platforms"}
+  {"action": "lobbyist", "name": "John Doe"}
+  {"action": "issue", "code": "CPT", "year": 2025}
+  {"action": "bill_lobbying", "bill": "hr1234", "congress": 119}
+  {"action": "revolving_door", "name": "John Smith"}
+  {"action": "top_spenders", "year": 2025, "count": 20}
+  {"action": "industry", "code": "B12", "year": 2025}
+
+Output JSON: structured lobbying data with AI analysis
+
+Senate LDA API: No API key required (public).
+OpenSecrets API: Requires OPENSECRETS_API_KEY (free at opensecrets.org/api).
+"""
+
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime
+
+# API endpoints
+SENATE_LDA_BASE = "https://lda.senate.gov/api/v1"
+OPENSECRETS_BASE = "https://www.opensecrets.org/api/"
+PROPUBLICA_BASE = "https://api.propublica.org/congress/v1"
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+OPENSECRETS_KEY = os.environ.get("OPENSECRETS_API_KEY", "")
+
+
+def web_request(url, headers=None, timeout=30):
+    """Make an HTTP request with proper error handling."""
+    default_headers = {
+        "User-Agent": "CleansingFire/0.1 (lobbying research; https://github.com/bedwards/cleansing-fire)",
+        "Accept": "application/json",
+    }
+    if headers:
+        default_headers.update(headers)
+
+    req = urllib.request.Request(url, headers=default_headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {"_raw_text": raw}
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8")[:500]
+        except Exception:
+            pass
+        return {"error": f"HTTP {e.code}: {e.reason}. {body}", "error_code": "API_ERROR"}
+    except urllib.error.URLError as e:
+        return {"error": f"Connection error: {e.reason}", "error_code": "API_ERROR"}
+    except Exception as e:
+        return {"error": str(e), "error_code": "INTERNAL_ERROR"}
+
+
+def opensecrets_api(method, **params):
+    """Call the OpenSecrets API."""
+    if not OPENSECRETS_KEY:
+        return {"error": "OPENSECRETS_API_KEY not set. Get a free key at opensecrets.org/api", "error_code": "API_KEY_MISSING"}
+
+    params["apikey"] = OPENSECRETS_KEY
+    params["method"] = method
+    params["output"] = "json"
+    query = urllib.parse.urlencode(params)
+    url = f"{OPENSECRETS_BASE}?{query}"
+    return web_request(url)
+
+
+def ask_gatekeeper(prompt, system="", temperature=0.2):
+    """Submit analysis to gatekeeper LLM."""
+    payload = {
+        "prompt": prompt,
+        "system": system or (
+            "You are a lobbying and government influence analyst. You trace the connections "
+            "between corporate lobbying expenditures, former government officials, specific "
+            "legislation, and policy outcomes. Follow the money. Name names. Expose the "
+            "revolving door. Apply the principle of Pyrrhic Lucidity: make hidden mechanisms "
+            "of power translation visible."
+        ),
+        "caller": "plugin:lobby-tracker",
+        "temperature": temperature,
+        "max_tokens": 2048,
+        "timeout": 180,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=190) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return f"[LLM Error: {body.get('error', 'unknown')}]"
+    except Exception as e:
+        return f"[Gatekeeper unavailable: {e}]"
+
+
+# ---------------------------------------------------------------------------
+# Senate LDA (Lobbying Disclosure Act) API
+# ---------------------------------------------------------------------------
+
+def search_lobbying(query, year=None, filing_type=""):
+    """Search lobbying filings via Senate LDA API."""
+    params = {
+        "search": query,
+        "page_size": 25,
+    }
+    if year:
+        params["filing_year"] = str(year)
+    if filing_type:
+        params["filing_type"] = filing_type
+
+    query_string = urllib.parse.urlencode(params)
+    url = f"{SENATE_LDA_BASE}/filings/?{query_string}"
+    result = web_request(url)
+
+    if "error" in result:
+        # Fallback: try the contributions endpoint
+        url2 = f"{SENATE_LDA_BASE}/contributions/?{query_string}"
+        result = web_request(url2)
+        if "error" in result:
+            return result
+
+    filings = []
+    for filing in result.get("results", []):
+        filings.append({
+            "filing_uuid": filing.get("filing_uuid", ""),
+            "filing_type": filing.get("filing_type_display", filing.get("filing_type", "")),
+            "filing_year": filing.get("filing_year", ""),
+            "filing_period": filing.get("filing_period_display", filing.get("filing_period", "")),
+            "registrant_name": filing.get("registrant", {}).get("name", "") if isinstance(filing.get("registrant"), dict) else str(filing.get("registrant", "")),
+            "client_name": filing.get("client", {}).get("name", "") if isinstance(filing.get("client"), dict) else str(filing.get("client", "")),
+            "income": filing.get("income", None),
+            "expenses": filing.get("expenses", None),
+            "lobbying_activities": [
+                {
+                    "general_issue": act.get("general_issue_code_display", act.get("general_issue_code", "")),
+                    "description": act.get("description", "")[:200],
+                    "lobbyists": [
+                        {
+                            "name": f"{lob.get('lobbyist', {}).get('first_name', '')} {lob.get('lobbyist', {}).get('last_name', '')}".strip() if isinstance(lob.get('lobbyist'), dict) else str(lob.get('lobbyist', '')),
+                            "covered_position": lob.get("covered_official_position", ""),
+                        }
+                        for lob in act.get("lobbyists", [])
+                    ],
+                }
+                for act in filing.get("lobbying_activities", [])[:5]
+            ],
+            "url": filing.get("filing_url", f"https://lda.senate.gov/filings/public/filing/{filing.get('filing_uuid', '')}/"),
+        })
+
+    total = result.get("count", len(filings))
+
+    return {
+        "query": query,
+        "year": year,
+        "filings": filings,
+        "total": total,
+        "count": len(filings),
+    }
+
+
+def get_registrant(name):
+    """Look up a lobbying registrant (lobbying firm or self-filing org)."""
+    params = {"search": name, "page_size": 10}
+    query_string = urllib.parse.urlencode(params)
+    url = f"{SENATE_LDA_BASE}/registrants/?{query_string}"
+    result = web_request(url)
+
+    if "error" in result:
+        return result
+
+    registrants = []
+    for reg in result.get("results", []):
+        reg_id = reg.get("id", "")
+        registrants.append({
+            "id": reg_id,
+            "name": reg.get("name", ""),
+            "description": reg.get("description", ""),
+            "address": reg.get("address", ""),
+            "country": reg.get("country_display", reg.get("country", "")),
+            "url": reg.get("url", ""),
+        })
+
+    # Get recent filings for the first registrant
+    recent_filings = []
+    if registrants:
+        top_name = registrants[0].get("name", name)
+        filings_result = search_lobbying(top_name, year=datetime.now().year)
+        if "filings" in filings_result:
+            recent_filings = filings_result["filings"][:10]
+
+    # Calculate total spending
+    total_income = sum(
+        float(f.get("income", 0) or 0) for f in recent_filings
+    )
+    total_expenses = sum(
+        float(f.get("expenses", 0) or 0) for f in recent_filings
+    )
+
+    analysis = None
+    if recent_filings:
+        activities = []
+        for f in recent_filings:
+            for act in f.get("lobbying_activities", []):
+                lobbyist_names = [l.get("name", "") for l in act.get("lobbyists", [])]
+                covered = [l.get("covered_position", "") for l in act.get("lobbyists", []) if l.get("covered_position")]
+                activities.append(f"  Issue: {act.get('general_issue', '')}\n  Description: {act.get('description', '')}\n  Lobbyists: {', '.join(lobbyist_names)}\n  Former officials: {', '.join(covered) if covered else 'None listed'}")
+
+        analysis = ask_gatekeeper(f"""LOBBYING REGISTRANT ANALYSIS: {name}
+
+Registrant info: {json.dumps(registrants[:3], indent=2)}
+
+RECENT FILINGS ({len(recent_filings)} found):
+Total income reported: ${total_income:,.0f}
+Total expenses reported: ${total_expenses:,.0f}
+
+LOBBYING ACTIVITIES:
+{chr(10).join(activities[:10])}
+
+ANALYZE:
+1. What issues is this firm/org lobbying on?
+2. What clients do they represent?
+3. Are there former government officials (covered positions) among the lobbyists? This is the revolving door.
+4. How much money is flowing through this lobbying operation?
+5. What policy outcomes are they likely seeking?
+6. Are there potential conflicts of interest?
+7. Rate the democratic accountability concern: 1 (low) to 10 (high)""")
+
+    return {
+        "query": name,
+        "registrants": registrants,
+        "recent_filings": recent_filings,
+        "total_income": total_income,
+        "total_expenses": total_expenses,
+        "ai_analysis": analysis,
+    }
+
+
+def get_client(name):
+    """Look up lobbying activity for a specific client."""
+    params = {"search": name, "page_size": 10}
+    query_string = urllib.parse.urlencode(params)
+    url = f"{SENATE_LDA_BASE}/clients/?{query_string}"
+    result = web_request(url)
+
+    if "error" in result:
+        return result
+
+    clients = []
+    for c in result.get("results", []):
+        clients.append({
+            "id": c.get("id", ""),
+            "name": c.get("name", ""),
+            "general_description": c.get("general_description", ""),
+            "country": c.get("country_display", c.get("country", "")),
+            "state": c.get("state", ""),
+        })
+
+    # Get filings where this entity is the client
+    filings_result = search_lobbying(name)
+    filings = filings_result.get("filings", []) if "filings" in filings_result else []
+
+    # Filter to filings where this entity is actually the client
+    client_filings = [
+        f for f in filings
+        if name.lower() in f.get("client_name", "").lower()
+    ]
+
+    total_spending = sum(
+        float(f.get("income", 0) or f.get("expenses", 0) or 0)
+        for f in client_filings
+    )
+
+    # Collect all lobbyists and firms used
+    firms_used = set()
+    lobbyists_used = set()
+    issues = set()
+    revolving_door = []
+    for f in client_filings:
+        firms_used.add(f.get("registrant_name", ""))
+        for act in f.get("lobbying_activities", []):
+            issues.add(act.get("general_issue", ""))
+            for lob in act.get("lobbyists", []):
+                lobbyists_used.add(lob.get("name", ""))
+                if lob.get("covered_position"):
+                    revolving_door.append({
+                        "name": lob.get("name", ""),
+                        "former_position": lob.get("covered_position", ""),
+                    })
+
+    analysis = ask_gatekeeper(f"""LOBBYING CLIENT ANALYSIS: {name}
+
+Client info: {json.dumps(clients[:3], indent=2)}
+
+LOBBYING SPENDING: ${total_spending:,.0f} across {len(client_filings)} filings
+
+LOBBYING FIRMS HIRED: {', '.join(firms_used) if firms_used else 'None found'}
+
+ISSUES LOBBIED: {', '.join(issues) if issues else 'None found'}
+
+REVOLVING DOOR LOBBYISTS (former officials):
+{json.dumps(revolving_door, indent=2) if revolving_door else 'None detected'}
+
+ALL LOBBYISTS: {', '.join(list(lobbyists_used)[:15])}
+
+ANALYZE:
+1. How much is {name} spending on lobbying?
+2. What specific policies are they trying to influence?
+3. Are they hiring former government officials to lobby? (revolving door)
+4. Which lobbying firms do they use, and what does that tell us?
+5. What is the likely return on investment for this lobbying?
+6. How does this lobbying connect to their business interests?
+7. Are there bills or regulations they are likely trying to shape?""")
+
+    return {
+        "query": name,
+        "clients": clients,
+        "filings": client_filings[:10],
+        "total_spending": total_spending,
+        "firms_used": list(firms_used),
+        "issues_lobbied": list(issues),
+        "revolving_door": revolving_door,
+        "lobbyists": list(lobbyists_used)[:20],
+        "ai_analysis": analysis,
+    }
+
+
+def search_lobbyist(name):
+    """Search for a specific lobbyist and their filing history."""
+    params = {"search": name, "page_size": 25}
+    query_string = urllib.parse.urlencode(params)
+    url = f"{SENATE_LDA_BASE}/lobbyists/?{query_string}"
+    result = web_request(url)
+
+    if "error" in result:
+        return result
+
+    lobbyists = []
+    for lob in result.get("results", []):
+        lobbyists.append({
+            "id": lob.get("id", ""),
+            "first_name": lob.get("first_name", ""),
+            "last_name": lob.get("last_name", ""),
+            "prefix": lob.get("prefix", ""),
+            "suffix": lob.get("suffix", ""),
+        })
+
+    # Search filings mentioning this lobbyist
+    filings_result = search_lobbying(name)
+    filings = filings_result.get("filings", []) if "filings" in filings_result else []
+
+    # Track who this lobbyist works for
+    clients_served = set()
+    firms = set()
+    issues_covered = set()
+    covered_position = ""
+
+    for f in filings:
+        clients_served.add(f.get("client_name", ""))
+        firms.add(f.get("registrant_name", ""))
+        for act in f.get("lobbying_activities", []):
+            issues_covered.add(act.get("general_issue", ""))
+            for lob in act.get("lobbyists", []):
+                if name.lower() in lob.get("name", "").lower():
+                    if lob.get("covered_position"):
+                        covered_position = lob.get("covered_position", "")
+
+    analysis = ask_gatekeeper(f"""LOBBYIST PROFILE: {name}
+
+FORMER GOVERNMENT POSITION: {covered_position or 'None disclosed'}
+
+LOBBYING FIRMS: {', '.join(firms) if firms else 'None found'}
+CLIENTS SERVED: {', '.join(list(clients_served)[:15])}
+ISSUES: {', '.join(list(issues_covered)[:10])}
+
+RECENT FILINGS: {len(filings)}
+
+ANALYZE:
+1. Is this lobbyist a former government official? (revolving door)
+2. If so, what position did they hold and who do they now lobby for?
+3. What pattern of clients and issues does this person handle?
+4. Are there conflicts of interest between their former role and current clients?
+5. What access and influence does this lobbyist likely have?
+6. Is this person a key node in a lobbying network?""")
+
+    return {
+        "query": name,
+        "lobbyists": lobbyists,
+        "covered_position": covered_position,
+        "clients_served": list(clients_served)[:20],
+        "firms": list(firms),
+        "issues": list(issues_covered),
+        "filings_count": len(filings),
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# OpenSecrets integration
+# ---------------------------------------------------------------------------
+
+def get_top_spenders(year=2025, count=20):
+    """Get top lobbying spenders from OpenSecrets."""
+    # Try OpenSecrets API
+    result = opensecrets_api("getOrgs", id="all")
+
+    # If OpenSecrets API fails, fall back to Senate LDA search
+    if "error" in result:
+        # Search for high-value filings
+        filings_result = search_lobbying("", year=year)
+        if "error" in filings_result:
+            return filings_result
+
+        # Aggregate by client
+        client_spending = {}
+        for f in filings_result.get("filings", []):
+            client = f.get("client_name", "Unknown")
+            amount = float(f.get("income", 0) or f.get("expenses", 0) or 0)
+            client_spending[client] = client_spending.get(client, 0) + amount
+
+        # Sort by spending
+        top = sorted(client_spending.items(), key=lambda x: -x[1])[:count]
+
+        return {
+            "year": year,
+            "source": "Senate LDA",
+            "top_spenders": [
+                {"name": name, "total": amount}
+                for name, amount in top
+            ],
+            "note": "Aggregated from available Senate LDA filings. May not represent complete annual data.",
+        }
+
+    # Parse OpenSecrets response
+    orgs = result.get("response", {}).get("organizations", {}).get("organization", [])
+    if isinstance(orgs, dict):
+        orgs = [orgs]
+
+    spenders = []
+    for org in orgs[:count]:
+        attrs = org.get("@attributes", org)
+        spenders.append({
+            "name": attrs.get("orgname", ""),
+            "total": attrs.get("total", ""),
+            "org_id": attrs.get("orgid", ""),
+        })
+
+    return {
+        "year": year,
+        "source": "OpenSecrets",
+        "top_spenders": spenders,
+        "count": len(spenders),
+    }
+
+
+def get_industry_lobbying(industry_code, year=2025):
+    """Get lobbying data for a specific industry sector."""
+    # Senate LDA uses general issue codes for broad categories
+    # Map common industry terms to LDA issue codes
+    ISSUE_CODES = {
+        "TAX": "Taxation/Internal Revenue Code",
+        "HCR": "Health Issues",
+        "ENV": "Environment/Superfund",
+        "DEF": "Defense",
+        "TRD": "Trade",
+        "FIN": "Financial Institutions",
+        "CPT": "Computers/Information Technology",
+        "TEC": "Telecommunications",
+        "ENG": "Energy/Nuclear",
+        "TRA": "Transportation",
+        "EDU": "Education",
+        "AGR": "Agriculture",
+        "BNK": "Banking",
+        "LBR": "Labor Issues",
+        "IMM": "Immigration",
+        "CSP": "Consumer Issues",
+        "MED": "Media",
+        "BUD": "Budget/Appropriations",
+    }
+
+    issue_name = ISSUE_CODES.get(industry_code.upper(), industry_code)
+
+    # Search filings for this issue area
+    filings_result = search_lobbying(issue_name, year=year)
+
+    if "error" in filings_result:
+        return filings_result
+
+    filings = filings_result.get("filings", [])
+
+    # Aggregate spending by client
+    client_spending = {}
+    for f in filings:
+        client = f.get("client_name", "Unknown")
+        amount = float(f.get("income", 0) or f.get("expenses", 0) or 0)
+        client_spending[client] = client_spending.get(client, 0) + amount
+
+    top_clients = sorted(client_spending.items(), key=lambda x: -x[1])[:15]
+    total = sum(v for _, v in top_clients)
+
+    analysis = ask_gatekeeper(f"""INDUSTRY LOBBYING ANALYSIS: {issue_name} ({industry_code})
+
+Year: {year}
+Total filings found: {filings_result.get('total', len(filings))}
+
+TOP SPENDERS IN THIS AREA:
+{chr(10).join(f"- {name}: ${amount:,.0f}" for name, amount in top_clients[:10])}
+
+Total from top spenders: ${total:,.0f}
+
+ANALYZE:
+1. What specific policies are being lobbied in this area?
+2. Which companies dominate this lobbying sector?
+3. Is the lobbying concentrated (few big spenders) or distributed?
+4. What is likely at stake (regulations, contracts, tax provisions)?
+5. Are there clear winners and losers in the policy outcomes being sought?
+6. How does this lobbying affect the public interest?""")
+
+    return {
+        "industry_code": industry_code,
+        "industry_name": issue_name,
+        "year": year,
+        "total_filings": filings_result.get("total", len(filings)),
+        "top_clients": [{"name": n, "spending": s} for n, s in top_clients],
+        "total_top_spending": total,
+        "sample_filings": filings[:5],
+        "ai_analysis": analysis,
+    }
+
+
+def get_bill_lobbying(bill_id, congress=119):
+    """Find lobbying activity related to a specific bill."""
+    # Search for the bill ID in lobbying filings
+    filings_result = search_lobbying(bill_id)
+
+    if "error" in filings_result:
+        return filings_result
+
+    filings = filings_result.get("filings", [])
+
+    # Also search without the prefix
+    bill_number = re.sub(r"^(hr|s|hres|sres)", "", bill_id.lower())
+    if bill_number != bill_id.lower():
+        alt_result = search_lobbying(bill_number)
+        if "filings" in alt_result:
+            filings.extend(alt_result["filings"])
+
+    # Deduplicate
+    seen = set()
+    unique_filings = []
+    for f in filings:
+        fid = f.get("filing_uuid", "")
+        if fid not in seen:
+            seen.add(fid)
+            unique_filings.append(f)
+
+    # Who is lobbying on this bill
+    for_bill = set()
+    against_bill = set()  # Hard to determine from filings alone
+    all_lobbyists = set()
+
+    for f in unique_filings:
+        client = f.get("client_name", "")
+        if client:
+            for_bill.add(client)
+        for act in f.get("lobbying_activities", []):
+            for lob in act.get("lobbyists", []):
+                all_lobbyists.add(lob.get("name", ""))
+
+    analysis = ask_gatekeeper(f"""BILL LOBBYING ANALYSIS: {bill_id} (Congress {congress})
+
+ORGANIZATIONS LOBBYING ON THIS BILL:
+{chr(10).join(f"- {org}" for org in list(for_bill)[:15]) if for_bill else "None found in available data"}
+
+LOBBYISTS INVOLVED:
+{', '.join(list(all_lobbyists)[:15]) if all_lobbyists else "None found"}
+
+FILING DETAILS (sample):
+{json.dumps(unique_filings[:5], indent=2)}
+
+ANALYZE:
+1. Who is lobbying on this bill and what do they want?
+2. Are the lobbying organizations likely for or against the bill?
+3. How much money is being spent to influence this legislation?
+4. Are there revolving door connections?
+5. What does the lobbying pattern tell us about who this bill really serves?""")
+
+    return {
+        "bill_id": bill_id,
+        "congress": congress,
+        "organizations_lobbying": list(for_bill),
+        "lobbyists": list(all_lobbyists)[:20],
+        "filings": unique_filings[:10],
+        "filing_count": len(unique_filings),
+        "ai_analysis": analysis,
+    }
+
+
+def search_revolving_door(name):
+    """Search for revolving door connections -- former officials now lobbying."""
+    # Search LDA for lobbyists with covered official positions
+    lobbyist_result = search_lobbyist(name)
+
+    # Also search OpenSecrets for revolving door data
+    os_result = opensecrets_api("revolving", id=name) if OPENSECRETS_KEY else {"error": "No API key"}
+
+    revolving_door_entries = []
+    if lobbyist_result.get("covered_position"):
+        revolving_door_entries.append({
+            "name": name,
+            "former_position": lobbyist_result.get("covered_position"),
+            "current_clients": lobbyist_result.get("clients_served", [])[:10],
+            "current_firms": lobbyist_result.get("firms", []),
+            "source": "Senate LDA",
+        })
+
+    # Parse OpenSecrets revolving door data if available
+    if "error" not in os_result:
+        for entry in os_result.get("response", {}).get("revolving", {}).get("member", []):
+            if isinstance(entry, dict):
+                attrs = entry.get("@attributes", entry)
+                revolving_door_entries.append({
+                    "name": attrs.get("member_name", ""),
+                    "former_position": attrs.get("former_position", ""),
+                    "current_employer": attrs.get("orgname", ""),
+                    "source": "OpenSecrets",
+                })
+
+    analysis = None
+    if revolving_door_entries:
+        analysis = ask_gatekeeper(f"""REVOLVING DOOR ANALYSIS: {name}
+
+REVOLVING DOOR RECORDS:
+{json.dumps(revolving_door_entries, indent=2)}
+
+ADDITIONAL LOBBYIST DATA:
+{json.dumps({k: v for k, v in lobbyist_result.items() if k != 'ai_analysis'}, indent=2)}
+
+ANALYZE:
+1. What government position(s) did this person hold?
+2. Who are they now lobbying for?
+3. Is there a direct conflict between their former official role and current lobbying clients?
+4. What regulatory or policy areas bridge their government and lobbying work?
+5. How does this revolving door case affect democratic accountability?
+6. Are there cooling-off period violations or concerns?
+7. Rate the revolving door severity: 1 (minor) to 10 (severe corruption risk)""")
+
+    return {
+        "query": name,
+        "revolving_door_entries": revolving_door_entries,
+        "lobbyist_profile": {k: v for k, v in lobbyist_result.items() if k != "ai_analysis"},
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
+
+def emit_error(msg, code="INVALID_INPUT"):
+    json.dump({"error": msg, "error_code": code}, sys.stdout, indent=2)
+    sys.exit(1)
+
+
+def main():
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            emit_error("No input provided. Send JSON with an 'action' field on stdin.", "MISSING_FIELD")
+        input_data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        emit_error(f"Invalid JSON input: {e}", "INVALID_INPUT")
+
+    action = input_data.get("action", "")
+    if not action:
+        emit_error(
+            "Missing 'action' field. Valid actions: search, registrant, client, lobbyist, "
+            "issue, bill_lobbying, revolving_door, top_spenders, industry",
+            "MISSING_FIELD",
+        )
+
+    current_year = datetime.now().year
+
+    if action == "search":
+        query = input_data.get("query", "")
+        if not query:
+            emit_error("'search' requires a 'query' field.", "MISSING_FIELD")
+        result = search_lobbying(
+            query,
+            year=input_data.get("year"),
+            filing_type=input_data.get("filing_type", ""),
+        )
+
+    elif action == "registrant":
+        name = input_data.get("name", "")
+        if not name:
+            emit_error("'registrant' requires a 'name' field.", "MISSING_FIELD")
+        result = get_registrant(name)
+
+    elif action == "client":
+        name = input_data.get("name", "")
+        if not name:
+            emit_error("'client' requires a 'name' field.", "MISSING_FIELD")
+        result = get_client(name)
+
+    elif action == "lobbyist":
+        name = input_data.get("name", "")
+        if not name:
+            emit_error("'lobbyist' requires a 'name' field.", "MISSING_FIELD")
+        result = search_lobbyist(name)
+
+    elif action == "issue":
+        code = input_data.get("code", "")
+        if not code:
+            emit_error("'issue' requires a 'code' field (e.g. CPT, HCR, DEF).", "MISSING_FIELD")
+        result = get_industry_lobbying(code, year=input_data.get("year", current_year))
+
+    elif action == "bill_lobbying":
+        bill = input_data.get("bill", "")
+        if not bill:
+            emit_error("'bill_lobbying' requires a 'bill' field (e.g. hr1234).", "MISSING_FIELD")
+        result = get_bill_lobbying(bill, congress=input_data.get("congress", 119))
+
+    elif action == "revolving_door":
+        name = input_data.get("name", "")
+        if not name:
+            emit_error("'revolving_door' requires a 'name' field.", "MISSING_FIELD")
+        result = search_revolving_door(name)
+
+    elif action == "top_spenders":
+        result = get_top_spenders(
+            year=input_data.get("year", current_year),
+            count=input_data.get("count", 20),
+        )
+
+    elif action == "industry":
+        code = input_data.get("code", "")
+        if not code:
+            emit_error("'industry' requires a 'code' field.", "MISSING_FIELD")
+        result = get_industry_lobbying(code, year=input_data.get("year", current_year))
+
+    else:
+        emit_error(
+            f"Unknown action: '{action}'. Valid actions: search, registrant, client, "
+            "lobbyist, issue, bill_lobbying, revolving_door, top_spenders, industry",
+            "UNKNOWN_ACTION",
+        )
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,1111 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: News Monitor (RSS/API)
+
+Monitors news across publicly available RSS feeds and free news APIs
+to track stories related to corporate power, corruption, lobbying,
+surveillance, and the concentration of power.
+
+Input JSON:
+  {"action": "search", "query": "corporate lobbying", "sources": ["google", "propublica"]}
+  {"action": "monitor", "terms": ["dark money", "lobbying", "surveillance"]}
+  {"action": "trending"}
+  {"action": "sources"}
+
+Output JSON: varies by action
+
+Optional env vars for enhanced coverage:
+  NEWSAPI_KEY        - NewsAPI.org API key (free tier at newsapi.org)
+  MEDIASTACK_KEY     - MediaStack API key (free tier at mediastack.com)
+
+Manifest:
+  name: news-monitor
+  category: osint
+  description: Monitors news via RSS feeds and free APIs for stories on corporate power and corruption
+  actions:
+    - name: search
+      description: Search across feeds for keywords related to corporate power, corruption, lobbying
+    - name: monitor
+      description: Set up monitoring terms and return new matches across all sources
+    - name: trending
+      description: Identify trending topics related to power concentration
+    - name: sources
+      description: List all configured news sources with their status
+  requires_env: []
+  uses_gatekeeper: true
+  calls_plugins: []
+"""
+
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+import urllib.parse
+import xml.etree.ElementTree as ET
+from html import unescape
+
+GATEKEEPER_URL = os.environ.get("GATEKEEPER_URL", "http://127.0.0.1:7800")
+
+# ---------------------------------------------------------------------------
+# RSS Feed registry
+# ---------------------------------------------------------------------------
+
+RSS_FEEDS = {
+    # Major wire services / national
+    "google_news": {
+        "name": "Google News",
+        "url": "https://news.google.com/rss",
+        "search_url": "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en",
+        "category": "aggregator",
+        "description": "Google News aggregated headlines",
+    },
+    "reuters": {
+        "name": "Reuters",
+        "url": "https://www.reutersagency.com/feed/?taxonomy=best-sectors&post_type=best",
+        "category": "wire",
+        "description": "Reuters wire service",
+    },
+    "ap_news": {
+        "name": "Associated Press",
+        "url": "https://rsshub.app/apnews/topics/apf-topnews",
+        "category": "wire",
+        "description": "AP News top stories",
+    },
+    "bbc_news": {
+        "name": "BBC News",
+        "url": "http://feeds.bbci.co.uk/news/rss.xml",
+        "category": "international",
+        "description": "BBC News world coverage",
+    },
+    "bbc_business": {
+        "name": "BBC Business",
+        "url": "http://feeds.bbci.co.uk/news/business/rss.xml",
+        "category": "business",
+        "description": "BBC business and corporate news",
+    },
+    "npr": {
+        "name": "NPR News",
+        "url": "https://feeds.npr.org/1001/rss.xml",
+        "category": "national",
+        "description": "NPR top stories",
+    },
+
+    # Investigative journalism outlets
+    "propublica": {
+        "name": "ProPublica",
+        "url": "https://www.propublica.org/feeds/propublica/main",
+        "category": "investigative",
+        "description": "ProPublica investigative journalism",
+    },
+    "the_intercept": {
+        "name": "The Intercept",
+        "url": "https://theintercept.com/feed/?rss",
+        "category": "investigative",
+        "description": "The Intercept - adversarial journalism",
+    },
+    "bellingcat": {
+        "name": "Bellingcat",
+        "url": "https://www.bellingcat.com/feed/",
+        "category": "investigative",
+        "description": "Bellingcat open source investigations",
+    },
+
+    # Government / policy watchdog
+    "opensecrets": {
+        "name": "OpenSecrets",
+        "url": "https://www.opensecrets.org/news/feed/",
+        "category": "watchdog",
+        "description": "OpenSecrets money-in-politics tracking",
+    },
+    "eff": {
+        "name": "Electronic Frontier Foundation",
+        "url": "https://www.eff.org/rss/updates.xml",
+        "category": "civil_liberties",
+        "description": "EFF digital rights and surveillance coverage",
+    },
+
+    # Tech / corporate power
+    "ars_technica": {
+        "name": "Ars Technica",
+        "url": "https://feeds.arstechnica.com/arstechnica/index",
+        "category": "tech",
+        "description": "Ars Technica tech and policy coverage",
+    },
+    "techdirt": {
+        "name": "Techdirt",
+        "url": "https://www.techdirt.com/feed/",
+        "category": "tech_policy",
+        "description": "Techdirt tech policy and corporate accountability",
+    },
+}
+
+# Thematic keyword sets for scoring relevance to the Cleansing Fire mission
+POWER_KEYWORDS = {
+    "corruption": [
+        "corruption", "bribery", "kickback", "graft", "embezzlement",
+        "pay-to-play", "quid pro quo", "self-dealing", "nepotism",
+        "fraud", "indictment", "criminal charges",
+    ],
+    "lobbying": [
+        "lobbying", "lobbyist", "revolving door", "influence peddling",
+        "political action committee", "PAC", "super PAC", "dark money",
+        "campaign finance", "donor", "bundler", "political spending",
+    ],
+    "corporate_power": [
+        "monopoly", "antitrust", "merger", "acquisition", "market dominance",
+        "price fixing", "cartel", "oligopoly", "corporate consolidation",
+        "too big to fail", "regulatory capture", "deregulation",
+    ],
+    "surveillance": [
+        "surveillance", "mass surveillance", "privacy", "data collection",
+        "facial recognition", "tracking", "wiretap", "FISA", "NSA",
+        "Palantir", "Clearview", "spyware", "Pegasus", "backdoor",
+    ],
+    "labor": [
+        "union busting", "wage theft", "labor violation", "gig economy",
+        "worker exploitation", "sweatshop", "right to work",
+        "collective bargaining", "strike", "NLRB",
+    ],
+    "environment": [
+        "pollution", "environmental crime", "EPA violation", "toxic waste",
+        "greenwashing", "climate denial", "fossil fuel", "pipeline",
+        "environmental justice", "superfund",
+    ],
+    "civil_rights": [
+        "civil rights", "voter suppression", "gerrymandering",
+        "police brutality", "excessive force", "racial profiling",
+        "discrimination", "censorship", "free speech", "press freedom",
+    ],
+}
+
+# Flatten for quick matching
+ALL_POWER_KEYWORDS = []
+for category_keywords in POWER_KEYWORDS.values():
+    ALL_POWER_KEYWORDS.extend(category_keywords)
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+
+def http_get(url, timeout=20, headers=None):
+    """Fetch a URL and return (data_bytes, error_string)."""
+    hdrs = {"User-Agent": "CleansingFire/0.1 NewsMonitor"}
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read(), None
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}: {e.reason}"
+    except urllib.error.URLError as e:
+        return None, f"URL error: {e.reason}"
+    except Exception as e:
+        return None, str(e)
+
+
+def http_get_json(url, timeout=20, headers=None):
+    """Fetch JSON from a URL."""
+    data, err = http_get(url, timeout=timeout, headers=headers)
+    if err:
+        return None, err
+    try:
+        return json.loads(data.decode("utf-8")), None
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        return None, f"JSON decode error: {e}"
+
+
+# ---------------------------------------------------------------------------
+# RSS parsing
+# ---------------------------------------------------------------------------
+
+def strip_html(text):
+    """Remove HTML tags and decode entities."""
+    if not text:
+        return ""
+    text = unescape(text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def parse_rss(xml_bytes, source_key):
+    """Parse RSS/Atom XML into a list of article dicts."""
+    articles = []
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return articles
+
+    # Strip namespaces for simpler XPath
+    ns_map = {}
+    for elem in root.iter():
+        if "}" in elem.tag:
+            ns_uri = elem.tag.split("}")[0] + "}"
+            prefix = elem.tag.split("}")[0].split("{")[-1]
+            ns_map[prefix] = ns_uri
+
+    # Try RSS 2.0 items
+    items = root.findall(".//item")
+    if not items:
+        # Try Atom entries
+        atom_ns = "{http://www.w3.org/2005/Atom}"
+        items = root.findall(f".//{atom_ns}entry")
+        if not items:
+            # Try without namespace
+            items = root.findall(".//entry")
+
+    for item in items:
+        article = _extract_item(item, source_key)
+        if article:
+            articles.append(article)
+
+    return articles
+
+
+def _extract_item(item, source_key):
+    """Extract article data from an RSS item or Atom entry."""
+    atom_ns = "{http://www.w3.org/2005/Atom}"
+
+    # Title
+    title_el = item.find("title")
+    if title_el is None:
+        title_el = item.find(f"{atom_ns}title")
+    title = strip_html(title_el.text if title_el is not None and title_el.text else "")
+
+    if not title:
+        return None
+
+    # Link
+    link_el = item.find("link")
+    if link_el is not None:
+        link = link_el.text or link_el.get("href", "")
+    else:
+        link_el = item.find(f"{atom_ns}link")
+        link = link_el.get("href", "") if link_el is not None else ""
+    link = (link or "").strip()
+
+    # Description / summary
+    desc_el = item.find("description")
+    if desc_el is None:
+        desc_el = item.find(f"{atom_ns}summary")
+    if desc_el is None:
+        desc_el = item.find(f"{atom_ns}content")
+    description = strip_html(desc_el.text if desc_el is not None and desc_el.text else "")
+
+    # Published date
+    pub_el = item.find("pubDate")
+    if pub_el is None:
+        pub_el = item.find(f"{atom_ns}published")
+    if pub_el is None:
+        pub_el = item.find(f"{atom_ns}updated")
+    pub_date = (pub_el.text or "").strip() if pub_el is not None else ""
+
+    # Category / tags
+    categories = []
+    for cat_el in item.findall("category"):
+        cat_text = cat_el.text or cat_el.get("term", "")
+        if cat_text:
+            categories.append(cat_text.strip())
+    for cat_el in item.findall(f"{atom_ns}category"):
+        cat_text = cat_el.get("term", "") or (cat_el.text or "")
+        if cat_text:
+            categories.append(cat_text.strip())
+
+    # Generate a stable ID from title+link
+    id_str = f"{title}|{link}"
+    article_id = hashlib.sha256(id_str.encode("utf-8")).hexdigest()[:16]
+
+    return {
+        "id": article_id,
+        "title": title,
+        "link": link,
+        "description": description[:500],
+        "published": pub_date,
+        "source": source_key,
+        "source_name": RSS_FEEDS.get(source_key, {}).get("name", source_key),
+        "categories": categories,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Relevance scoring
+# ---------------------------------------------------------------------------
+
+def score_relevance(article, extra_terms=None):
+    """Score how relevant an article is to the Cleansing Fire mission.
+
+    Returns a dict with overall score (0-100) and category breakdown.
+    """
+    text = f"{article.get('title', '')} {article.get('description', '')}".lower()
+
+    category_scores = {}
+    total_hits = 0
+
+    for category, keywords in POWER_KEYWORDS.items():
+        hits = 0
+        matched = []
+        for kw in keywords:
+            if kw.lower() in text:
+                hits += 1
+                matched.append(kw)
+        if hits > 0:
+            category_scores[category] = {
+                "hits": hits,
+                "matched_keywords": matched,
+            }
+            total_hits += hits
+
+    # Boost for extra user-specified terms
+    extra_hits = 0
+    extra_matched = []
+    if extra_terms:
+        for term in extra_terms:
+            if term.lower() in text:
+                extra_hits += 1
+                extra_matched.append(term)
+        if extra_hits:
+            category_scores["user_terms"] = {
+                "hits": extra_hits,
+                "matched_keywords": extra_matched,
+            }
+            total_hits += extra_hits * 2  # weight user terms higher
+
+    # Score: 0-100 based on keyword density and category coverage
+    category_count = len(category_scores)
+    score = min(100, total_hits * 15 + category_count * 10)
+
+    return {
+        "score": score,
+        "category_hits": category_scores,
+        "total_keyword_hits": total_hits,
+        "categories_matched": category_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Feed fetching
+# ---------------------------------------------------------------------------
+
+def fetch_feed(source_key, query=None):
+    """Fetch and parse a single RSS feed. If query is set and the source
+    supports search, use the search URL."""
+    source = RSS_FEEDS.get(source_key)
+    if not source:
+        return [], f"Unknown source: {source_key}"
+
+    url = source["url"]
+    if query and "search_url" in source:
+        url = source["search_url"].format(query=urllib.parse.quote_plus(query))
+
+    sys.stderr.write(f"[news-monitor] Fetching {source['name']}: {url}\n")
+    data, err = http_get(url, timeout=20)
+    if err:
+        return [], err
+
+    articles = parse_rss(data, source_key)
+    return articles, None
+
+
+def fetch_all_feeds(query=None, source_keys=None, limit_per_feed=20):
+    """Fetch multiple feeds, optionally filtering by source keys and query."""
+    if source_keys is None:
+        source_keys = list(RSS_FEEDS.keys())
+
+    all_articles = []
+    feed_errors = {}
+
+    for key in source_keys:
+        articles, err = fetch_feed(key, query=query)
+        if err:
+            feed_errors[key] = err
+            continue
+        all_articles.extend(articles[:limit_per_feed])
+
+    return all_articles, feed_errors
+
+
+# ---------------------------------------------------------------------------
+# ProPublica API (free, no key required)
+# ---------------------------------------------------------------------------
+
+PROPUBLICA_API_BASE = "https://projects.propublica.org/nonprofits/api/v2"
+
+
+def propublica_nonprofit_search(query):
+    """Search ProPublica nonprofit explorer for organizations."""
+    url = f"{PROPUBLICA_API_BASE}/search.json?q={urllib.parse.quote_plus(query)}"
+    data, err = http_get_json(url, timeout=20)
+    if err:
+        return {"error": f"ProPublica API error: {err}"}
+
+    orgs = []
+    for org in (data.get("organizations") or [])[:10]:
+        orgs.append({
+            "name": org.get("name", ""),
+            "ein": org.get("ein", ""),
+            "city": org.get("city", ""),
+            "state": org.get("state", ""),
+            "ntee_code": org.get("ntee_code", ""),
+            "total_revenue": org.get("total_revenue", 0),
+            "total_expenses": org.get("total_expenses", 0),
+        })
+    return {"organizations": orgs, "count": len(orgs)}
+
+
+# ---------------------------------------------------------------------------
+# Optional: NewsAPI.org (requires key, free tier)
+# ---------------------------------------------------------------------------
+
+NEWSAPI_BASE = "https://newsapi.org/v2"
+
+
+def newsapi_search(query, page_size=20):
+    """Search NewsAPI.org if NEWSAPI_KEY is set."""
+    api_key = os.environ.get("NEWSAPI_KEY", "")
+    if not api_key:
+        return None  # silently skip if no key
+
+    params = urllib.parse.urlencode({
+        "q": query,
+        "pageSize": page_size,
+        "sortBy": "publishedAt",
+        "language": "en",
+        "apiKey": api_key,
+    })
+    url = f"{NEWSAPI_BASE}/everything?{params}"
+    data, err = http_get_json(url, timeout=20)
+    if err:
+        sys.stderr.write(f"[news-monitor] NewsAPI error: {err}\n")
+        return None
+
+    if data.get("status") != "ok":
+        sys.stderr.write(f"[news-monitor] NewsAPI status: {data.get('status')}\n")
+        return None
+
+    articles = []
+    for a in data.get("articles", []):
+        article_id = hashlib.sha256(
+            f"{a.get('title','')}|{a.get('url','')}".encode("utf-8")
+        ).hexdigest()[:16]
+        articles.append({
+            "id": article_id,
+            "title": a.get("title", ""),
+            "link": a.get("url", ""),
+            "description": strip_html(a.get("description", ""))[:500],
+            "published": a.get("publishedAt", ""),
+            "source": "newsapi",
+            "source_name": a.get("source", {}).get("name", "NewsAPI"),
+            "categories": [],
+        })
+    return articles
+
+
+# ---------------------------------------------------------------------------
+# Optional: MediaStack (requires key, free tier)
+# ---------------------------------------------------------------------------
+
+MEDIASTACK_BASE = "http://api.mediastack.com/v1"
+
+
+def mediastack_search(query, limit=20):
+    """Search MediaStack if MEDIASTACK_KEY is set."""
+    api_key = os.environ.get("MEDIASTACK_KEY", "")
+    if not api_key:
+        return None  # silently skip if no key
+
+    params = urllib.parse.urlencode({
+        "access_key": api_key,
+        "keywords": query,
+        "languages": "en",
+        "limit": limit,
+        "sort": "published_desc",
+    })
+    url = f"{MEDIASTACK_BASE}/news?{params}"
+    data, err = http_get_json(url, timeout=20)
+    if err:
+        sys.stderr.write(f"[news-monitor] MediaStack error: {err}\n")
+        return None
+
+    articles = []
+    for a in data.get("data", []):
+        article_id = hashlib.sha256(
+            f"{a.get('title','')}|{a.get('url','')}".encode("utf-8")
+        ).hexdigest()[:16]
+        articles.append({
+            "id": article_id,
+            "title": a.get("title", ""),
+            "link": a.get("url", ""),
+            "description": strip_html(a.get("description", ""))[:500],
+            "published": a.get("published_at", ""),
+            "source": "mediastack",
+            "source_name": a.get("source", "MediaStack"),
+            "categories": [a.get("category", "")],
+        })
+    return articles
+
+
+# ---------------------------------------------------------------------------
+# Gatekeeper LLM integration
+# ---------------------------------------------------------------------------
+
+def ask_gatekeeper(prompt, system=""):
+    """Submit a prompt to the gatekeeper for LLM analysis."""
+    payload = {
+        "prompt": prompt,
+        "system": system or (
+            "You are an investigative news analyst for a project tracking "
+            "corporate power, corruption, and the concentration of power. "
+            "Be concise, factual, and focus on connections, power dynamics, "
+            "and who benefits. Cite specific details from the articles."
+        ),
+        "caller": "plugin:news-monitor",
+        "temperature": 0.3,
+        "max_tokens": 2048,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return f"[LLM Error: {body.get('error', 'unknown')}]"
+    except Exception as e:
+        return f"[Gatekeeper unavailable: {e}]"
+
+
+# ---------------------------------------------------------------------------
+# Action: search
+# ---------------------------------------------------------------------------
+
+def action_search(input_data):
+    """Search across feeds for a query, score relevance, and return results."""
+    query = input_data.get("query", "").strip()
+    if not query:
+        return {
+            "error": "Missing required field: 'query'",
+            "error_code": "MISSING_FIELD",
+        }
+
+    requested_sources = input_data.get("sources")  # optional list of source keys
+    max_results = input_data.get("max_results", 50)
+    include_analysis = input_data.get("analyze", False)
+
+    # Determine which source keys to use
+    if requested_sources:
+        # Validate source keys
+        valid_keys = []
+        invalid_keys = []
+        for s in requested_sources:
+            if s in RSS_FEEDS or s in ("newsapi", "mediastack", "propublica_nonprofits"):
+                valid_keys.append(s)
+            else:
+                invalid_keys.append(s)
+        source_keys = [k for k in valid_keys if k in RSS_FEEDS]
+        use_newsapi = "newsapi" in valid_keys
+        use_mediastack = "mediastack" in valid_keys
+        use_propublica = "propublica_nonprofits" in valid_keys
+    else:
+        source_keys = list(RSS_FEEDS.keys())
+        use_newsapi = True
+        use_mediastack = True
+        use_propublica = False
+        invalid_keys = []
+
+    # Fetch RSS feeds (Google News supports search URL; others get post-filtered)
+    all_articles, feed_errors = fetch_all_feeds(
+        query=query, source_keys=source_keys, limit_per_feed=25
+    )
+
+    # Supplement with API-based sources
+    if use_newsapi:
+        api_articles = newsapi_search(query)
+        if api_articles:
+            all_articles.extend(api_articles)
+
+    if use_mediastack:
+        api_articles = mediastack_search(query)
+        if api_articles:
+            all_articles.extend(api_articles)
+
+    # Filter by query relevance for feeds that don't support search URLs
+    query_lower = query.lower()
+    query_terms = query_lower.split()
+    filtered = []
+    for article in all_articles:
+        text = f"{article.get('title','')} {article.get('description','')}".lower()
+        # For Google News search results, include all
+        if article.get("source") == "google_news":
+            filtered.append(article)
+        # For others, check if any query term appears
+        elif any(term in text for term in query_terms):
+            filtered.append(article)
+
+    # Score relevance
+    scored = []
+    for article in filtered:
+        rel = score_relevance(article, extra_terms=query_terms)
+        article["relevance"] = rel
+        scored.append(article)
+
+    # Sort by relevance score descending
+    scored.sort(key=lambda a: a["relevance"]["score"], reverse=True)
+
+    # Deduplicate by title similarity
+    seen_titles = set()
+    unique = []
+    for article in scored:
+        title_key = re.sub(r"[^a-z0-9]", "", article["title"].lower())[:60]
+        if title_key not in seen_titles:
+            seen_titles.add(title_key)
+            unique.append(article)
+
+    results = unique[:max_results]
+
+    # Optional: LLM analysis of top results
+    analysis = None
+    if include_analysis and results:
+        top_articles = results[:10]
+        article_texts = "\n".join(
+            f"- [{a['source_name']}] {a['title']}: {a['description'][:200]}"
+            for a in top_articles
+        )
+        analysis = ask_gatekeeper(
+            f"Analyze these news articles found for the query '{query}'.\n\n"
+            f"Articles:\n{article_texts}\n\n"
+            f"Provide:\n"
+            f"1. Key themes and patterns across these stories\n"
+            f"2. Power dynamics: who benefits, who is harmed\n"
+            f"3. Connections to corporate power or corruption\n"
+            f"4. Recommended follow-up investigations"
+        )
+
+    output = {
+        "query": query,
+        "total_results": len(results),
+        "sources_queried": len(source_keys),
+        "articles": results,
+    }
+    if feed_errors:
+        output["feed_errors"] = feed_errors
+    if invalid_keys:
+        output["invalid_sources"] = invalid_keys
+    if analysis:
+        output["ai_analysis"] = analysis
+    if use_propublica:
+        pp_result = propublica_nonprofit_search(query)
+        if not pp_result.get("error"):
+            output["propublica_nonprofits"] = pp_result
+
+    return output
+
+
+# ---------------------------------------------------------------------------
+# Action: monitor
+# ---------------------------------------------------------------------------
+
+def action_monitor(input_data):
+    """Monitor multiple terms across all sources and return matches."""
+    terms = input_data.get("terms", [])
+    if not terms:
+        return {
+            "error": "Missing required field: 'terms' (list of monitoring terms)",
+            "error_code": "MISSING_FIELD",
+        }
+
+    max_per_term = input_data.get("max_per_term", 20)
+    include_analysis = input_data.get("analyze", True)
+
+    all_matches = {}
+    summary_stats = {
+        "total_articles": 0,
+        "total_high_relevance": 0,
+        "terms_with_results": 0,
+    }
+
+    for term in terms:
+        # Fetch from Google News (supports search) + investigative feeds
+        priority_sources = [
+            "google_news", "propublica", "the_intercept", "bellingcat",
+            "opensecrets", "eff", "techdirt",
+        ]
+        articles, errors = fetch_all_feeds(
+            query=term, source_keys=priority_sources, limit_per_feed=15
+        )
+
+        # Also try NewsAPI for broader coverage
+        api_articles = newsapi_search(term, page_size=10)
+        if api_articles:
+            articles.extend(api_articles)
+
+        # Filter to term relevance
+        term_lower = term.lower()
+        matched = []
+        for article in articles:
+            text = f"{article.get('title','')} {article.get('description','')}".lower()
+            if term_lower in text or any(
+                w in text for w in term_lower.split()
+            ):
+                rel = score_relevance(article, extra_terms=[term])
+                article["relevance"] = rel
+                matched.append(article)
+
+        # Sort by relevance
+        matched.sort(key=lambda a: a["relevance"]["score"], reverse=True)
+
+        # Deduplicate
+        seen = set()
+        unique = []
+        for a in matched:
+            key = re.sub(r"[^a-z0-9]", "", a["title"].lower())[:60]
+            if key not in seen:
+                seen.add(key)
+                unique.append(a)
+
+        unique = unique[:max_per_term]
+        high_rel = [a for a in unique if a["relevance"]["score"] >= 30]
+
+        all_matches[term] = {
+            "articles": unique,
+            "count": len(unique),
+            "high_relevance_count": len(high_rel),
+        }
+        if errors:
+            all_matches[term]["feed_errors"] = errors
+
+        summary_stats["total_articles"] += len(unique)
+        summary_stats["total_high_relevance"] += len(high_rel)
+        if unique:
+            summary_stats["terms_with_results"] += 1
+
+    # Optional: LLM summary across all monitoring terms
+    analysis = None
+    if include_analysis and summary_stats["total_articles"] > 0:
+        digest_lines = []
+        for term, data in all_matches.items():
+            top = data["articles"][:3]
+            if top:
+                headlines = "; ".join(a["title"][:80] for a in top)
+                digest_lines.append(f"  [{term}] ({data['count']} results): {headlines}")
+
+        if digest_lines:
+            analysis = ask_gatekeeper(
+                f"Summarize this news monitoring sweep across {len(terms)} terms.\n\n"
+                f"Results:\n" + "\n".join(digest_lines) + "\n\n"
+                f"Provide:\n"
+                f"1. Overview: what is happening across these topics right now\n"
+                f"2. Most significant story and why it matters\n"
+                f"3. Connections between topics (if any)\n"
+                f"4. Urgency ranking: which topics need immediate attention"
+            )
+
+    output = {
+        "terms": terms,
+        "summary": summary_stats,
+        "matches": all_matches,
+    }
+    if analysis:
+        output["ai_analysis"] = analysis
+
+    return output
+
+
+# ---------------------------------------------------------------------------
+# Action: trending
+# ---------------------------------------------------------------------------
+
+def action_trending(input_data):
+    """Identify trending topics related to power concentration."""
+    # Fetch headlines from all major sources
+    headline_sources = [
+        "google_news", "bbc_news", "npr", "propublica",
+        "the_intercept", "opensecrets", "eff", "ars_technica",
+    ]
+
+    all_articles, feed_errors = fetch_all_feeds(
+        source_keys=headline_sources, limit_per_feed=30
+    )
+
+    # Score every article for mission relevance
+    scored = []
+    for article in all_articles:
+        rel = score_relevance(article)
+        if rel["score"] > 0:
+            article["relevance"] = rel
+            scored.append(article)
+
+    # Sort by score
+    scored.sort(key=lambda a: a["relevance"]["score"], reverse=True)
+
+    # Deduplicate
+    seen = set()
+    unique = []
+    for a in scored:
+        key = re.sub(r"[^a-z0-9]", "", a["title"].lower())[:60]
+        if key not in seen:
+            seen.add(key)
+            unique.append(a)
+
+    top_articles = unique[:30]
+
+    # Aggregate keyword categories
+    category_counts = {}
+    for article in top_articles:
+        for cat, data in article["relevance"].get("category_hits", {}).items():
+            if cat not in category_counts:
+                category_counts[cat] = {
+                    "article_count": 0,
+                    "total_hits": 0,
+                    "sample_keywords": set(),
+                }
+            category_counts[cat]["article_count"] += 1
+            category_counts[cat]["total_hits"] += data["hits"]
+            category_counts[cat]["sample_keywords"].update(data["matched_keywords"][:3])
+
+    # Convert sets to lists for JSON serialization
+    for cat in category_counts:
+        category_counts[cat]["sample_keywords"] = list(
+            category_counts[cat]["sample_keywords"]
+        )
+
+    # Sort categories by article count
+    trending_categories = sorted(
+        category_counts.items(),
+        key=lambda x: x[1]["article_count"],
+        reverse=True,
+    )
+
+    # LLM analysis of trends
+    include_analysis = input_data.get("analyze", True)
+    analysis = None
+    if include_analysis and top_articles:
+        article_lines = "\n".join(
+            f"- [{a['source_name']}] {a['title']}"
+            for a in top_articles[:15]
+        )
+        cat_lines = "\n".join(
+            f"- {cat}: {data['article_count']} articles "
+            f"(keywords: {', '.join(data['sample_keywords'][:5])})"
+            for cat, data in trending_categories
+        )
+        analysis = ask_gatekeeper(
+            f"Analyze current news trends related to power and corruption.\n\n"
+            f"Top trending categories:\n{cat_lines}\n\n"
+            f"Top relevant headlines:\n{article_lines}\n\n"
+            f"Provide:\n"
+            f"1. What are the dominant power-related narratives right now?\n"
+            f"2. Which stories represent the most significant threats "
+            f"to democratic accountability?\n"
+            f"3. Emerging patterns: what should we watch for next?\n"
+            f"4. Recommended investigation targets based on these trends"
+        )
+
+    output = {
+        "total_scanned": len(all_articles),
+        "relevant_articles": len(unique),
+        "trending_categories": [
+            {"category": cat, **data} for cat, data in trending_categories
+        ],
+        "top_articles": top_articles[:20],
+    }
+    if feed_errors:
+        output["feed_errors"] = feed_errors
+    if analysis:
+        output["ai_analysis"] = analysis
+
+    return output
+
+
+# ---------------------------------------------------------------------------
+# Action: sources
+# ---------------------------------------------------------------------------
+
+def action_sources(input_data):
+    """List all configured news sources with their status."""
+    check_health = input_data.get("check_health", False)
+    sources = []
+
+    for key, feed in RSS_FEEDS.items():
+        source_info = {
+            "key": key,
+            "name": feed["name"],
+            "url": feed["url"],
+            "category": feed["category"],
+            "description": feed["description"],
+            "has_search": "search_url" in feed,
+        }
+
+        if check_health:
+            data, err = http_get(feed["url"], timeout=10)
+            if err:
+                source_info["status"] = "error"
+                source_info["status_detail"] = err
+            else:
+                articles = parse_rss(data, key)
+                source_info["status"] = "ok"
+                source_info["article_count"] = len(articles)
+
+        sources.append(source_info)
+
+    # API-based sources
+    api_sources = []
+
+    newsapi_key = os.environ.get("NEWSAPI_KEY", "")
+    api_sources.append({
+        "key": "newsapi",
+        "name": "NewsAPI.org",
+        "type": "api",
+        "configured": bool(newsapi_key),
+        "env_var": "NEWSAPI_KEY",
+        "description": "News articles from 80,000+ sources. Free tier: 100 requests/day.",
+        "signup_url": "https://newsapi.org/register",
+    })
+
+    mediastack_key = os.environ.get("MEDIASTACK_KEY", "")
+    api_sources.append({
+        "key": "mediastack",
+        "name": "MediaStack",
+        "type": "api",
+        "configured": bool(mediastack_key),
+        "env_var": "MEDIASTACK_KEY",
+        "description": "Real-time news data API. Free tier: 500 requests/month.",
+        "signup_url": "https://mediastack.com/signup/free",
+    })
+
+    api_sources.append({
+        "key": "propublica_nonprofits",
+        "name": "ProPublica Nonprofit Explorer",
+        "type": "api",
+        "configured": True,  # No key required
+        "description": "Search nonprofit organizations and their financials. No API key needed.",
+    })
+
+    # Category summary
+    categories = {}
+    for s in sources:
+        cat = s["category"]
+        if cat not in categories:
+            categories[cat] = 0
+        categories[cat] += 1
+
+    return {
+        "rss_feeds": sources,
+        "api_sources": api_sources,
+        "total_rss_feeds": len(sources),
+        "total_api_sources": len(api_sources),
+        "categories": categories,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
+
+def main():
+    # Read input from stdin
+    try:
+        raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+        if not raw.strip():
+            json.dump(
+                {
+                    "error": "No input provided. Send JSON on stdin with an 'action' field.",
+                    "error_code": "INVALID_INPUT",
+                    "details": {
+                        "valid_actions": ["search", "monitor", "trending", "sources"],
+                        "examples": {
+                            "search": {"action": "search", "query": "corporate lobbying"},
+                            "monitor": {
+                                "action": "monitor",
+                                "terms": ["dark money", "surveillance", "antitrust"],
+                            },
+                            "trending": {"action": "trending"},
+                            "sources": {"action": "sources"},
+                        },
+                    },
+                },
+                sys.stdout,
+                indent=2,
+            )
+            sys.exit(2)
+
+        input_data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        json.dump(
+            {
+                "error": f"Invalid JSON input: {e}",
+                "error_code": "INVALID_INPUT",
+            },
+            sys.stdout,
+            indent=2,
+        )
+        sys.exit(2)
+
+    if not isinstance(input_data, dict):
+        json.dump(
+            {
+                "error": "Input must be a JSON object",
+                "error_code": "INVALID_INPUT",
+            },
+            sys.stdout,
+            indent=2,
+        )
+        sys.exit(2)
+
+    action = input_data.get("action", "")
+    if not action:
+        json.dump(
+            {
+                "error": "Missing required field: 'action'",
+                "error_code": "MISSING_FIELD",
+                "details": {
+                    "valid_actions": ["search", "monitor", "trending", "sources"],
+                },
+            },
+            sys.stdout,
+            indent=2,
+        )
+        sys.exit(2)
+
+    # Dispatch
+    if action == "search":
+        result = action_search(input_data)
+    elif action == "monitor":
+        result = action_monitor(input_data)
+    elif action == "trending":
+        result = action_trending(input_data)
+    elif action == "sources":
+        result = action_sources(input_data)
+    else:
+        result = {
+            "error": f"Unknown action: '{action}'",
+            "error_code": "UNKNOWN_ACTION",
+            "details": {
+                "valid_actions": ["search", "monitor", "trending", "sources"],
+            },
+        }
+
+    json.dump(result, sys.stdout, indent=2)
+
+    # Exit with appropriate code
+    if "error" in result:
+        error_code = result.get("error_code", "")
+        if error_code in ("INVALID_INPUT", "MISSING_FIELD", "UNKNOWN_ACTION"):
+            sys.exit(2)
+        else:
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
