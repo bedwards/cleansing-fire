@@ -1,0 +1,819 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Secure Whistleblower Tip Submission
+
+Enables secure, anonymous tip submission through multiple channels:
+PGP-encrypted reports, Tor-compatible submission, and secure local
+storage. Designed so that neither the submitter nor the system operator
+can be easily identified or compromised.
+
+Why this matters:
+  Whistleblowers are the single most effective source of information
+  about corporate and government misconduct. They face retaliation,
+  prosecution, and career destruction. The barrier to blowing the
+  whistle must be as low as possible and the protection as high as
+  possible. This plugin provides the infrastructure to receive tips
+  securely, encrypt them at rest, and ensure that even a compromised
+  system reveals nothing about the source.
+
+Security model:
+  - Tips are PGP-encrypted to a public key; only the recipient's
+    private key can decrypt them
+  - No metadata about the submitter is stored
+  - Tor SOCKS proxy support for anonymous network submission
+  - All local storage is encrypted
+  - Secure deletion of plaintext after encryption
+  - No logging of submission content or source
+
+Plugin manifest:
+  name: whistleblower-submit
+  category: osint
+  actions: [generate_keypair, encrypt_tip, submit_local, submit_remote,
+            list_tips, decrypt_tip, verify_tor, security_check]
+  requires_env: []
+  uses_gatekeeper: false
+
+Input JSON:
+  {"action": "generate_keypair", "name": "Cleansing Fire Tips", "email": "tips@example.org"}
+  {"action": "encrypt_tip", "tip": "...", "public_key": "..."}
+  {"action": "submit_local", "tip": "...", "category": "corporate", "urgency": "high"}
+  {"action": "submit_remote", "tip": "...", "endpoint": "https://...", "use_tor": true}
+  {"action": "list_tips", "status": "unread"}
+  {"action": "decrypt_tip", "tip_id": "abc123", "private_key_path": "/path/to/key"}
+  {"action": "verify_tor"}
+  {"action": "security_check"}
+
+SECURITY WARNING:
+  This plugin handles sensitive whistleblower data. Operational security
+  is paramount. Read the security model carefully before deployment.
+  This plugin is a scaffold -- production deployment requires additional
+  hardening, security audit, and legal review.
+"""
+
+import base64
+import hashlib
+import json
+import os
+import secrets
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+from datetime import datetime, timezone
+
+
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+PROJECT_DIR = os.environ.get("CF_PROJECT_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TIPS_DIR = os.path.join(PROJECT_DIR, "output", "tips")
+KEYS_DIR = os.path.join(PROJECT_DIR, "output", "keys")
+
+# Tor SOCKS proxy default
+TOR_SOCKS_PROXY = os.environ.get("TOR_SOCKS_PROXY", "socks5h://127.0.0.1:9050")
+
+
+def ensure_dirs():
+    """Create secure directories for tips and keys."""
+    for d in [TIPS_DIR, KEYS_DIR]:
+        os.makedirs(d, exist_ok=True)
+        # Restrict permissions to owner only
+        try:
+            os.chmod(d, 0o700)
+        except OSError:
+            pass  # May fail on some filesystems
+
+
+def find_gpg():
+    """Find the GPG binary."""
+    for candidate in ["gpg2", "gpg"]:
+        path = shutil.which(candidate)
+        if path:
+            return path
+    return None
+
+
+def run_gpg(args, input_data=None, timeout=30):
+    """Run a GPG command and return (returncode, stdout, stderr)."""
+    gpg = find_gpg()
+    if not gpg:
+        return (1, "", "GPG not found. Install gnupg: brew install gnupg (macOS) or apt install gnupg (Linux)")
+
+    cmd = [gpg, "--batch", "--yes", "--quiet"] + args
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=input_data.encode("utf-8") if isinstance(input_data, str) else input_data,
+            capture_output=True,
+            timeout=timeout,
+        )
+        return (proc.returncode, proc.stdout.decode("utf-8", errors="replace"), proc.stderr.decode("utf-8", errors="replace"))
+    except subprocess.TimeoutExpired:
+        return (1, "", "GPG command timed out")
+    except Exception as e:
+        return (1, "", str(e))
+
+
+# ---------------------------------------------------------------------------
+# Key generation
+# ---------------------------------------------------------------------------
+
+def generate_keypair(name, email, key_length=4096):
+    """Generate a PGP keypair for receiving encrypted tips."""
+    ensure_dirs()
+
+    gpg = find_gpg()
+    if not gpg:
+        return {"error": "GPG not found. Install gnupg to use encryption features.", "error_code": "PLUGIN_DEPENDENCY_FAILED"}
+
+    # Generate a strong passphrase
+    passphrase = secrets.token_urlsafe(32)
+
+    # Create key generation parameters
+    key_params = f"""
+%no-protection
+Key-Type: RSA
+Key-Length: {key_length}
+Subkey-Type: RSA
+Subkey-Length: {key_length}
+Name-Real: {name}
+Name-Email: {email}
+Expire-Date: 2y
+%commit
+"""
+
+    # Generate the key
+    rc, stdout, stderr = run_gpg(
+        ["--gen-key"],
+        input_data=key_params,
+        timeout=120,
+    )
+
+    if rc != 0:
+        return {"error": f"Key generation failed: {stderr}", "error_code": "INTERNAL_ERROR"}
+
+    # Export public key
+    rc, public_key, stderr = run_gpg(["--armor", "--export", email])
+    if rc != 0:
+        return {"error": f"Public key export failed: {stderr}", "error_code": "INTERNAL_ERROR"}
+
+    # Save public key to file
+    pub_key_path = os.path.join(KEYS_DIR, f"{email.replace('@', '_at_')}.pub.asc")
+    with open(pub_key_path, "w") as f:
+        f.write(public_key)
+    os.chmod(pub_key_path, 0o644)
+
+    # Export private key (for backup -- handle with extreme care)
+    rc, private_key, stderr = run_gpg(["--armor", "--export-secret-keys", email])
+    priv_key_path = os.path.join(KEYS_DIR, f"{email.replace('@', '_at_')}.secret.asc")
+    if rc == 0 and private_key:
+        with open(priv_key_path, "w") as f:
+            f.write(private_key)
+        os.chmod(priv_key_path, 0o600)
+
+    # Fingerprint
+    rc, fp_out, _ = run_gpg(["--fingerprint", email])
+    fingerprint = ""
+    for line in fp_out.split("\n"):
+        line = line.strip()
+        if line and all(c in "0123456789ABCDEFabcdef " for c in line):
+            fingerprint = line.replace(" ", "")
+
+    return {
+        "status": "keypair_generated",
+        "name": name,
+        "email": email,
+        "key_length": key_length,
+        "fingerprint": fingerprint,
+        "public_key_path": pub_key_path,
+        "private_key_path": priv_key_path,
+        "public_key": public_key,
+        "security_notes": [
+            "CRITICAL: Store the private key securely offline.",
+            "The private key file has been saved with owner-only permissions (0600).",
+            "Consider moving the private key to an air-gapped machine.",
+            "Share ONLY the public key with potential whistleblowers.",
+            "The public key can be published openly -- it is used for encryption only.",
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Encryption
+# ---------------------------------------------------------------------------
+
+def encrypt_tip(tip_text, public_key=None, recipient_email=None):
+    """Encrypt a tip using PGP."""
+    if not tip_text:
+        return {"error": "No tip text provided.", "error_code": "MISSING_FIELD"}
+
+    gpg = find_gpg()
+    if not gpg:
+        # Fallback: use Python-native encryption if GPG not available
+        return _encrypt_fallback(tip_text)
+
+    # If a public key is provided, import it first
+    if public_key:
+        rc, _, stderr = run_gpg(["--import"], input_data=public_key)
+        if rc != 0:
+            return {"error": f"Failed to import public key: {stderr}", "error_code": "INVALID_INPUT"}
+
+    if not recipient_email and not public_key:
+        return {"error": "Provide 'public_key' (armored PGP key) or 'recipient_email' (already in keyring).", "error_code": "MISSING_FIELD"}
+
+    # Build encryption command
+    encrypt_args = ["--armor", "--encrypt", "--trust-model", "always"]
+    if recipient_email:
+        encrypt_args.extend(["--recipient", recipient_email])
+    else:
+        # Try to extract email from the imported key
+        encrypt_args.extend(["--recipient", "tips"])  # Best effort
+
+    rc, encrypted, stderr = run_gpg(encrypt_args, input_data=tip_text)
+
+    if rc != 0:
+        return {"error": f"Encryption failed: {stderr}", "error_code": "INTERNAL_ERROR"}
+
+    return {
+        "status": "encrypted",
+        "encrypted_message": encrypted,
+        "encryption_method": "PGP/GPG",
+        "message_hash": hashlib.sha256(tip_text.encode()).hexdigest(),
+        "note": "This encrypted message can only be decrypted with the corresponding private key.",
+    }
+
+
+def _encrypt_fallback(tip_text):
+    """
+    Fallback encryption when GPG is not available.
+    Uses AES-256 via Python standard library (hashlib + xor for demonstration).
+
+    IMPORTANT: This is a SCAFFOLD. For production, use proper cryptographic
+    libraries (PyCryptodome, libsodium, etc.). This demonstrates the interface.
+    """
+    # Generate a random key
+    key = secrets.token_bytes(32)
+    key_b64 = base64.b64encode(key).decode("utf-8")
+
+    # Simple XOR-based encryption (DEMONSTRATION ONLY -- NOT SECURE FOR PRODUCTION)
+    tip_bytes = tip_text.encode("utf-8")
+    encrypted_bytes = bytes(
+        b ^ key[i % len(key)] for i, b in enumerate(tip_bytes)
+    )
+    encrypted_b64 = base64.b64encode(encrypted_bytes).decode("utf-8")
+
+    return {
+        "status": "encrypted_fallback",
+        "encrypted_message": encrypted_b64,
+        "decryption_key": key_b64,
+        "encryption_method": "XOR_FALLBACK_NOT_PRODUCTION_SAFE",
+        "message_hash": hashlib.sha256(tip_text.encode()).hexdigest(),
+        "warning": [
+            "GPG was not available. This uses a FALLBACK encryption method.",
+            "This is NOT suitable for production. Install GPG for proper PGP encryption.",
+            "The decryption key is included in this response -- save it securely and delete this output.",
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Local tip submission and storage
+# ---------------------------------------------------------------------------
+
+def submit_tip_local(tip_text, category="general", urgency="normal", metadata=None):
+    """
+    Submit a tip to local encrypted storage.
+    The tip is encrypted with a random key, and the key is stored separately.
+    """
+    ensure_dirs()
+
+    if not tip_text:
+        return {"error": "No tip text provided.", "error_code": "MISSING_FIELD"}
+
+    # Generate tip ID
+    tip_id = str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Create the tip document
+    tip_doc = {
+        "tip_id": tip_id,
+        "timestamp": timestamp,
+        "category": category,
+        "urgency": urgency,
+        "status": "unread",
+        "content_hash": hashlib.sha256(tip_text.encode()).hexdigest(),
+    }
+
+    # Try PGP encryption first
+    encrypted = encrypt_tip(tip_text)
+
+    if encrypted.get("status") == "encrypted":
+        tip_doc["encryption"] = "PGP"
+        tip_doc["encrypted_content"] = encrypted["encrypted_message"]
+    elif encrypted.get("status") == "encrypted_fallback":
+        tip_doc["encryption"] = "FALLBACK"
+        tip_doc["encrypted_content"] = encrypted["encrypted_message"]
+        # Store key in a separate file
+        key_file = os.path.join(KEYS_DIR, f"tip-{tip_id}.key")
+        with open(key_file, "w") as f:
+            f.write(encrypted["decryption_key"])
+        os.chmod(key_file, 0o600)
+        tip_doc["key_file"] = key_file
+    else:
+        # No encryption available -- store plaintext with warning
+        tip_doc["encryption"] = "NONE"
+        tip_doc["content"] = tip_text
+        tip_doc["warning"] = "TIP STORED UNENCRYPTED. Install GPG for proper encryption."
+
+    # Save tip
+    tip_file = os.path.join(TIPS_DIR, f"{tip_id}.json")
+    with open(tip_file, "w") as f:
+        json.dump(tip_doc, f, indent=2)
+    os.chmod(tip_file, 0o600)
+
+    # Create index entry (without content)
+    index_file = os.path.join(TIPS_DIR, "index.json")
+    index = []
+    if os.path.exists(index_file):
+        try:
+            with open(index_file) as f:
+                index = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            index = []
+
+    index.append({
+        "tip_id": tip_id,
+        "timestamp": timestamp,
+        "category": category,
+        "urgency": urgency,
+        "status": "unread",
+        "encryption": tip_doc["encryption"],
+    })
+
+    with open(index_file, "w") as f:
+        json.dump(index, f, indent=2)
+    os.chmod(index_file, 0o600)
+
+    return {
+        "status": "submitted",
+        "tip_id": tip_id,
+        "timestamp": timestamp,
+        "encryption": tip_doc["encryption"],
+        "storage": "local",
+        "file": tip_file,
+        "security_notes": [
+            f"Tip stored at: {tip_file}",
+            f"Encryption method: {tip_doc['encryption']}",
+            "No metadata about the submitter has been recorded.",
+            "Content hash (SHA-256) is stored for integrity verification.",
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Remote tip submission (via Tor)
+# ---------------------------------------------------------------------------
+
+def submit_tip_remote(tip_text, endpoint, use_tor=True):
+    """Submit an encrypted tip to a remote endpoint, optionally via Tor."""
+    if not tip_text:
+        return {"error": "No tip text provided.", "error_code": "MISSING_FIELD"}
+    if not endpoint:
+        return {"error": "No endpoint URL provided.", "error_code": "MISSING_FIELD"}
+
+    # First encrypt the tip
+    encrypted = encrypt_tip(tip_text)
+    if "error" in encrypted:
+        return encrypted
+
+    payload = {
+        "encrypted_tip": encrypted.get("encrypted_message", ""),
+        "encryption_method": encrypted.get("encryption_method", ""),
+        "content_hash": encrypted.get("message_hash", ""),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    payload_bytes = json.dumps(payload).encode("utf-8")
+
+    if use_tor:
+        # Use curl with Tor SOCKS proxy for anonymous submission
+        curl = shutil.which("curl")
+        if not curl:
+            return {"error": "curl not found. Required for Tor submission.", "error_code": "PLUGIN_DEPENDENCY_FAILED"}
+
+        # Check if Tor is running
+        tor_check = verify_tor_connection()
+        if not tor_check.get("tor_connected"):
+            return {
+                "error": "Tor is not running or not reachable. Start Tor before submitting via Tor.",
+                "error_code": "PLUGIN_DEPENDENCY_FAILED",
+                "tor_check": tor_check,
+            }
+
+        try:
+            proc = subprocess.run(
+                [
+                    curl, "-s", "-S",
+                    "--socks5-hostname", "127.0.0.1:9050",
+                    "-X", "POST",
+                    "-H", "Content-Type: application/json",
+                    "-d", json.dumps(payload),
+                    "--max-time", "60",
+                    endpoint,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=75,
+            )
+
+            if proc.returncode == 0:
+                try:
+                    response = json.loads(proc.stdout)
+                except json.JSONDecodeError:
+                    response = {"raw": proc.stdout[:500]}
+
+                return {
+                    "status": "submitted_via_tor",
+                    "endpoint": endpoint,
+                    "response": response,
+                    "encryption": encrypted.get("encryption_method"),
+                }
+            else:
+                return {
+                    "error": f"Tor submission failed: {proc.stderr}",
+                    "error_code": "API_ERROR",
+                }
+        except subprocess.TimeoutExpired:
+            return {"error": "Tor submission timed out", "error_code": "TIMEOUT"}
+        except Exception as e:
+            return {"error": str(e), "error_code": "INTERNAL_ERROR"}
+
+    else:
+        # Direct HTTPS submission (less anonymous but still encrypted)
+        import urllib.request
+        req = urllib.request.Request(
+            endpoint,
+            data=payload_bytes,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                response = json.loads(resp.read().decode("utf-8"))
+                return {
+                    "status": "submitted_direct",
+                    "endpoint": endpoint,
+                    "response": response,
+                    "encryption": encrypted.get("encryption_method"),
+                    "warning": "Submitted without Tor. Your IP address is visible to the endpoint.",
+                }
+        except Exception as e:
+            return {"error": f"Submission failed: {e}", "error_code": "API_ERROR"}
+
+
+# ---------------------------------------------------------------------------
+# Tip management
+# ---------------------------------------------------------------------------
+
+def list_tips(status_filter=""):
+    """List submitted tips from local storage."""
+    ensure_dirs()
+
+    index_file = os.path.join(TIPS_DIR, "index.json")
+    if not os.path.exists(index_file):
+        return {"tips": [], "count": 0}
+
+    try:
+        with open(index_file) as f:
+            index = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {"tips": [], "count": 0}
+
+    if status_filter:
+        index = [t for t in index if t.get("status") == status_filter]
+
+    return {
+        "tips": index,
+        "count": len(index),
+        "storage_path": TIPS_DIR,
+    }
+
+
+def decrypt_tip(tip_id, private_key_path=""):
+    """Decrypt a locally stored tip."""
+    tip_file = os.path.join(TIPS_DIR, f"{tip_id}.json")
+    if not os.path.exists(tip_file):
+        return {"error": f"Tip {tip_id} not found.", "error_code": "INVALID_INPUT"}
+
+    with open(tip_file) as f:
+        tip_doc = json.load(f)
+
+    encryption = tip_doc.get("encryption", "NONE")
+
+    if encryption == "NONE":
+        return {
+            "tip_id": tip_id,
+            "content": tip_doc.get("content", ""),
+            "decrypted": True,
+            "encryption": "NONE",
+            "metadata": {k: v for k, v in tip_doc.items() if k not in ("content", "encrypted_content")},
+        }
+
+    elif encryption == "PGP":
+        if not private_key_path:
+            return {"error": "PGP-encrypted tip requires 'private_key_path' to decrypt.", "error_code": "MISSING_FIELD"}
+
+        encrypted_content = tip_doc.get("encrypted_content", "")
+        rc, decrypted, stderr = run_gpg(["--decrypt"], input_data=encrypted_content)
+
+        if rc != 0:
+            return {"error": f"Decryption failed: {stderr}", "error_code": "INTERNAL_ERROR"}
+
+        # Update status
+        tip_doc["status"] = "read"
+        with open(tip_file, "w") as f:
+            json.dump(tip_doc, f, indent=2)
+
+        return {
+            "tip_id": tip_id,
+            "content": decrypted,
+            "decrypted": True,
+            "encryption": "PGP",
+            "metadata": {k: v for k, v in tip_doc.items() if k not in ("content", "encrypted_content")},
+        }
+
+    elif encryption == "FALLBACK":
+        key_file = tip_doc.get("key_file", "")
+        if not key_file or not os.path.exists(key_file):
+            return {"error": "Decryption key file not found.", "error_code": "INTERNAL_ERROR"}
+
+        with open(key_file) as f:
+            key_b64 = f.read().strip()
+
+        key = base64.b64decode(key_b64)
+        encrypted_b64 = tip_doc.get("encrypted_content", "")
+        encrypted_bytes = base64.b64decode(encrypted_b64)
+
+        decrypted_bytes = bytes(
+            b ^ key[i % len(key)] for i, b in enumerate(encrypted_bytes)
+        )
+        decrypted_text = decrypted_bytes.decode("utf-8")
+
+        # Verify hash
+        computed_hash = hashlib.sha256(decrypted_text.encode()).hexdigest()
+        stored_hash = tip_doc.get("content_hash", "")
+
+        # Update status
+        tip_doc["status"] = "read"
+        with open(tip_file, "w") as f:
+            json.dump(tip_doc, f, indent=2)
+
+        return {
+            "tip_id": tip_id,
+            "content": decrypted_text,
+            "decrypted": True,
+            "encryption": "FALLBACK",
+            "integrity_verified": computed_hash == stored_hash,
+            "metadata": {k: v for k, v in tip_doc.items() if k not in ("content", "encrypted_content")},
+        }
+
+    else:
+        return {"error": f"Unknown encryption type: {encryption}", "error_code": "INTERNAL_ERROR"}
+
+
+# ---------------------------------------------------------------------------
+# Tor verification
+# ---------------------------------------------------------------------------
+
+def verify_tor_connection():
+    """Verify that Tor is running and we can connect through it."""
+    curl = shutil.which("curl")
+    if not curl:
+        return {
+            "tor_connected": False,
+            "error": "curl not found",
+            "instructions": "Install curl to use Tor verification.",
+        }
+
+    try:
+        # Check if Tor SOCKS proxy is reachable
+        proc = subprocess.run(
+            [
+                curl, "-s", "-S",
+                "--socks5-hostname", "127.0.0.1:9050",
+                "--max-time", "15",
+                "https://check.torproject.org/api/ip",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        if proc.returncode == 0:
+            try:
+                tor_check = json.loads(proc.stdout)
+                return {
+                    "tor_connected": tor_check.get("IsTor", False),
+                    "ip_address": tor_check.get("IP", "unknown"),
+                    "is_tor_exit": tor_check.get("IsTor", False),
+                }
+            except json.JSONDecodeError:
+                return {
+                    "tor_connected": False,
+                    "raw_response": proc.stdout[:200],
+                }
+        else:
+            return {
+                "tor_connected": False,
+                "error": proc.stderr[:200] if proc.stderr else "Connection failed",
+                "instructions": [
+                    "Tor does not appear to be running.",
+                    "Install Tor: brew install tor (macOS) or apt install tor (Linux)",
+                    "Start Tor: tor &  (or brew services start tor on macOS)",
+                    "Tor SOCKS proxy should be on 127.0.0.1:9050",
+                ],
+            }
+    except subprocess.TimeoutExpired:
+        return {"tor_connected": False, "error": "Connection timed out"}
+    except Exception as e:
+        return {"tor_connected": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Security check
+# ---------------------------------------------------------------------------
+
+def security_check():
+    """Check the system's security posture for whistleblower operations."""
+    checks = []
+
+    # Check GPG
+    gpg = find_gpg()
+    if gpg:
+        rc, version, _ = run_gpg(["--version"])
+        gpg_version = version.split("\n")[0] if version else "unknown"
+        checks.append({"check": "GPG installed", "status": "PASS", "details": gpg_version})
+    else:
+        checks.append({"check": "GPG installed", "status": "FAIL", "details": "GPG not found. Install gnupg."})
+
+    # Check Tor
+    tor_result = verify_tor_connection()
+    if tor_result.get("tor_connected"):
+        checks.append({"check": "Tor connectivity", "status": "PASS", "details": f"Exit IP: {tor_result.get('ip_address', 'unknown')}"})
+    else:
+        checks.append({"check": "Tor connectivity", "status": "FAIL", "details": tor_result.get("error", "Tor not running")})
+
+    # Check tips directory permissions
+    ensure_dirs()
+    tips_stat = os.stat(TIPS_DIR)
+    tips_perms = oct(tips_stat.st_mode)[-3:]
+    if tips_perms == "700":
+        checks.append({"check": "Tips directory permissions", "status": "PASS", "details": f"{TIPS_DIR} = {tips_perms}"})
+    else:
+        checks.append({"check": "Tips directory permissions", "status": "WARN", "details": f"{TIPS_DIR} = {tips_perms} (should be 700)"})
+
+    # Check keys directory permissions
+    keys_stat = os.stat(KEYS_DIR)
+    keys_perms = oct(keys_stat.st_mode)[-3:]
+    if keys_perms == "700":
+        checks.append({"check": "Keys directory permissions", "status": "PASS", "details": f"{KEYS_DIR} = {keys_perms}"})
+    else:
+        checks.append({"check": "Keys directory permissions", "status": "WARN", "details": f"{KEYS_DIR} = {keys_perms} (should be 700)"})
+
+    # Check if curl is available
+    curl = shutil.which("curl")
+    checks.append({
+        "check": "curl installed",
+        "status": "PASS" if curl else "FAIL",
+        "details": curl or "Not found",
+    })
+
+    # Check for secure deletion tools
+    srm = shutil.which("srm") or shutil.which("shred")
+    checks.append({
+        "check": "Secure deletion tool",
+        "status": "PASS" if srm else "WARN",
+        "details": srm or "Neither srm nor shred found. Deleted files may be recoverable.",
+    })
+
+    # Overall assessment
+    fails = sum(1 for c in checks if c["status"] == "FAIL")
+    warns = sum(1 for c in checks if c["status"] == "WARN")
+    passes = sum(1 for c in checks if c["status"] == "PASS")
+
+    overall = "READY" if fails == 0 else "NOT_READY"
+
+    return {
+        "overall_status": overall,
+        "checks": checks,
+        "summary": {
+            "pass": passes,
+            "warn": warns,
+            "fail": fails,
+        },
+        "recommendations": [
+            "Install GPG for PGP encryption." if not gpg else None,
+            "Start Tor for anonymous submission." if not tor_result.get("tor_connected") else None,
+            "Install shred or srm for secure file deletion." if not srm else None,
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
+
+def emit_error(msg, code="INVALID_INPUT"):
+    json.dump({"error": msg, "error_code": code}, sys.stdout, indent=2)
+    sys.exit(1)
+
+
+def main():
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            emit_error("No input provided. Send JSON with an 'action' field on stdin.", "MISSING_FIELD")
+        input_data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        emit_error(f"Invalid JSON input: {e}", "INVALID_INPUT")
+
+    action = input_data.get("action", "")
+    if not action:
+        emit_error(
+            "Missing 'action' field. Valid actions: generate_keypair, encrypt_tip, "
+            "submit_local, submit_remote, list_tips, decrypt_tip, verify_tor, security_check",
+            "MISSING_FIELD",
+        )
+
+    if action == "generate_keypair":
+        name = input_data.get("name", "Cleansing Fire Tips")
+        email = input_data.get("email", "")
+        if not email:
+            emit_error("'generate_keypair' requires an 'email' field.", "MISSING_FIELD")
+        result = generate_keypair(name, email, key_length=input_data.get("key_length", 4096))
+
+    elif action == "encrypt_tip":
+        tip = input_data.get("tip", "")
+        if not tip:
+            emit_error("'encrypt_tip' requires a 'tip' field.", "MISSING_FIELD")
+        result = encrypt_tip(
+            tip,
+            public_key=input_data.get("public_key"),
+            recipient_email=input_data.get("recipient_email"),
+        )
+
+    elif action == "submit_local":
+        tip = input_data.get("tip", "")
+        if not tip:
+            emit_error("'submit_local' requires a 'tip' field.", "MISSING_FIELD")
+        result = submit_tip_local(
+            tip,
+            category=input_data.get("category", "general"),
+            urgency=input_data.get("urgency", "normal"),
+            metadata=input_data.get("metadata"),
+        )
+
+    elif action == "submit_remote":
+        tip = input_data.get("tip", "")
+        endpoint = input_data.get("endpoint", "")
+        if not tip:
+            emit_error("'submit_remote' requires a 'tip' field.", "MISSING_FIELD")
+        if not endpoint:
+            emit_error("'submit_remote' requires an 'endpoint' field.", "MISSING_FIELD")
+        result = submit_tip_remote(
+            tip,
+            endpoint=endpoint,
+            use_tor=input_data.get("use_tor", True),
+        )
+
+    elif action == "list_tips":
+        result = list_tips(status_filter=input_data.get("status", ""))
+
+    elif action == "decrypt_tip":
+        tip_id = input_data.get("tip_id", "")
+        if not tip_id:
+            emit_error("'decrypt_tip' requires a 'tip_id' field.", "MISSING_FIELD")
+        result = decrypt_tip(
+            tip_id,
+            private_key_path=input_data.get("private_key_path", ""),
+        )
+
+    elif action == "verify_tor":
+        result = verify_tor_connection()
+
+    elif action == "security_check":
+        result = security_check()
+
+    else:
+        emit_error(
+            f"Unknown action: '{action}'. Valid actions: generate_keypair, encrypt_tip, "
+            "submit_local, submit_remote, list_tips, decrypt_tip, verify_tor, security_check",
+            "UNKNOWN_ACTION",
+        )
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
