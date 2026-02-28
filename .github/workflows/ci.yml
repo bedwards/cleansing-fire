@@ -1,0 +1,311 @@
+# =============================================================================
+# CI Pipeline — Cleansing Fire
+# =============================================================================
+# Runs on all PRs and pushes to main. Validates code quality, security,
+# plugin contracts, and file integrity.
+#
+# Covers:
+#   - Issue #69: CI/CD pipeline with linting, testing, integrity checks
+#   - Issue #98: Secret scanning and dependency audit
+#
+# Target: < 3 minutes total
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint: shellcheck, YAML validation, Python syntax
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck python3-yaml
+
+      - name: Shellcheck — scripts/
+        run: |
+          echo "=== Checking scripts/ ==="
+          ERRORS=0
+          for f in scripts/*.sh; do
+            if shellcheck -S warning "$f" 2>&1; then
+              echo "OK: $f"
+            else
+              echo "FAIL: $f"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          if [ $ERRORS -gt 0 ]; then
+            echo "::warning::$ERRORS scripts had shellcheck warnings"
+          fi
+
+      - name: Shellcheck — bin/
+        run: |
+          echo "=== Checking bin/ ==="
+          for f in bin/*; do
+            [ -f "$f" ] || continue
+            head -1 "$f" | grep -q "bash\|sh" || continue
+            shellcheck -S warning "$f" 2>&1 || echo "::warning::$f has issues"
+          done
+
+      - name: YAML validation — specs/
+        run: |
+          echo "=== Validating YAML specs ==="
+          python3 -c "
+          import yaml, sys, glob
+          errors = 0
+          for f in sorted(glob.glob('specs/*.yaml')):
+              try:
+                  with open(f) as fh:
+                      yaml.safe_load(fh)
+                  print(f'OK: {f}')
+              except Exception as e:
+                  print(f'FAIL: {f}: {e}')
+                  errors += 1
+          sys.exit(1 if errors else 0)
+          "
+
+      - name: Python syntax — plugins/
+        run: |
+          echo "=== Checking Python plugin syntax ==="
+          ERRORS=0
+          for f in plugins/*; do
+            [ -f "$f" ] || continue
+            head -1 "$f" | grep -q python || continue
+            if python3 -m py_compile "$f" 2>&1; then
+              echo "OK: $(basename $f)"
+            else
+              echo "FAIL: $(basename $f)"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          if [ $ERRORS -gt 0 ]; then
+            echo "::error::$ERRORS plugins have syntax errors"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Security: secret scanning, dangerous file patterns
+  # ---------------------------------------------------------------------------
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for exposed secrets
+        run: |
+          echo "=== Scanning for secrets ==="
+          FOUND=0
+
+          # Patterns for known API key formats
+          PATTERNS=(
+            'sk-ant-[a-zA-Z0-9_-]{20,}'          # Anthropic
+            'AIzaSy[a-zA-Z0-9_-]{33}'             # Google
+            'AKIA[A-Z0-9]{16}'                     # AWS
+            'ghp_[a-zA-Z0-9]{36}'                  # GitHub PAT
+            'gho_[a-zA-Z0-9]{36}'                  # GitHub OAuth
+            'sk-[a-zA-Z0-9]{48}'                   # OpenAI
+            '-----BEGIN.*PRIVATE KEY-----'          # PEM private keys
+            'password\s*=\s*["\x27][^"\x27]{8,}'    # Hardcoded passwords
+          )
+
+          for pattern in "${PATTERNS[@]}"; do
+            if grep -rn -E "$pattern" \
+              --include='*.py' --include='*.sh' --include='*.js' --include='*.ts' \
+              --include='*.json' --include='*.yaml' --include='*.yml' --include='*.md' \
+              --include='*.html' --include='*.css' --include='*.toml' \
+              . 2>/dev/null | grep -v node_modules | grep -v .git | grep -v '.env.example'; then
+              echo "::error::Potential secret found matching pattern: $pattern"
+              FOUND=$((FOUND + 1))
+            fi
+          done
+
+          if [ $FOUND -gt 0 ]; then
+            echo ""
+            echo "FAIL: $FOUND secret patterns detected"
+            exit 1
+          fi
+          echo "OK: No secrets detected"
+
+      - name: Check for dangerous files
+        run: |
+          echo "=== Checking for dangerous files ==="
+          DANGEROUS=(
+            "*.pem" "*.p12" "*.pfx" "*.key"
+            "token.json" "credentials.json"
+            ".env" ".env.*"
+          )
+          FOUND=0
+          for pattern in "${DANGEROUS[@]}"; do
+            matches=$(git ls-files "$pattern" 2>/dev/null)
+            if [ -n "$matches" ]; then
+              echo "::error::Dangerous file tracked: $matches"
+              FOUND=$((FOUND + 1))
+            fi
+          done
+          if [ $FOUND -gt 0 ]; then
+            echo "FAIL: $FOUND dangerous files are tracked by git"
+            exit 1
+          fi
+          echo "OK: No dangerous files tracked"
+
+      - name: Verify .env is not tracked
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is tracked by git!"
+            exit 1
+          fi
+          echo "OK: .env is not tracked"
+
+  # ---------------------------------------------------------------------------
+  # Test: plugin validation
+  # ---------------------------------------------------------------------------
+  test:
+    name: Plugin tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Make plugins executable
+        run: chmod +x plugins/*
+
+      - name: Run plugin tests
+        env:
+          CF_TEST_MODE: "1"
+          CF_PROJECT_DIR: ${{ github.workspace }}
+        run: scripts/test-plugins.sh --verbose
+
+  # ---------------------------------------------------------------------------
+  # Integrity: verify manifest hashes
+  # ---------------------------------------------------------------------------
+  integrity:
+    name: Integrity check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify critical files exist
+        run: |
+          echo "=== Checking critical files ==="
+          for f in CLAUDE.md LICENSE philosophy.md integrity-manifest.json; do
+            if [ -f "$f" ]; then
+              echo "OK: $f"
+            else
+              echo "::error::Critical file missing: $f"
+              exit 1
+            fi
+          done
+
+      - name: Verify AGPL-3.0 license
+        run: |
+          if grep -q "GNU AFFERO GENERAL PUBLIC LICENSE" LICENSE; then
+            echo "OK: AGPL-3.0 verified"
+          else
+            echo "::error::License is not AGPL-3.0"
+            exit 1
+          fi
+
+      - name: Verify 7 Principles
+        run: |
+          PRINCIPLES=(
+            "Lucidity Before Liberation"
+            "Relational Agency"
+            "Transparent Mechanism"
+            "Adversarial Collaboration"
+            "Minimum Viable Coercion"
+            "Recursive Accountability"
+            "Differential Solidarity"
+          )
+          for p in "${PRINCIPLES[@]}"; do
+            if grep -q "$p" philosophy.md; then
+              echo "OK: $p"
+            else
+              echo "::error::$p missing from philosophy.md"
+              exit 1
+            fi
+          done
+
+      - name: Verify integrity manifest
+        run: |
+          echo "=== Checking integrity-manifest.json ==="
+          python3 -c "
+          import json, hashlib, sys
+
+          with open('integrity-manifest.json') as f:
+              manifest = json.load(f)
+
+          errors = 0
+          files = manifest.get('files', manifest)
+          if isinstance(files, dict) and 'files' in files:
+              files = files['files']
+
+          for filepath, expected_hash in (files.items() if isinstance(files, dict) else []):
+              try:
+                  with open(filepath, 'rb') as fh:
+                      actual = hashlib.sha256(fh.read()).hexdigest()
+                  if actual == expected_hash:
+                      print(f'OK: {filepath}')
+                  else:
+                      print(f'MISMATCH: {filepath}')
+                      print(f'  expected: {expected_hash}')
+                      print(f'  actual:   {actual}')
+                      errors += 1
+              except FileNotFoundError:
+                  print(f'MISSING: {filepath}')
+                  errors += 1
+
+          if errors:
+              print(f'\\nFAIL: {errors} integrity check(s) failed')
+              sys.exit(1)
+          print('\\nOK: All integrity checks passed')
+          "
+
+  # ---------------------------------------------------------------------------
+  # Summary badge
+  # ---------------------------------------------------------------------------
+  status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    needs: [lint, security, test, integrity]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "## CI Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security | ${{ needs.security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integrity | ${{ needs.integrity.result }} |" >> $GITHUB_STEP_SUMMARY
+
+          # Fail if any required check failed
+          if [ "${{ needs.lint.result }}" = "failure" ] || \
+             [ "${{ needs.security.result }}" = "failure" ] || \
+             [ "${{ needs.test.result }}" = "failure" ] || \
+             [ "${{ needs.integrity.result }}" = "failure" ]; then
+            echo ""
+            echo "::error::One or more CI checks failed"
+            exit 1
+          fi
