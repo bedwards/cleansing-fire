@@ -1,0 +1,51 @@
+# =============================================================================
+# fire-markdown: LLM-Accessible Markdown Proxy Worker
+# =============================================================================
+# Proxies the Cleansing Fire GitHub Pages site with content negotiation.
+# Returns normal HTML by default (pass-through). When an LLM or agent
+# requests markdown (via Accept header or query param), converts HTML to
+# markdown on the fly.
+#
+# Conventions implemented:
+#   - Accept: text/markdown header (Cloudflare Markdown for Agents convention)
+#   - ?format=md query parameter (fallback for clients that can't set headers)
+#   - /llms.txt (llmstxt.org standard -- site index for LLM consumption)
+#   - /llms-full.txt (expanded version with all content descriptions)
+#   - Direct .md file serving with text/markdown content type
+#
+# Deployment: Automatic via GitHub Actions on push to main.
+# Manual: npx wrangler deploy
+# Local dev: npx wrangler dev
+# =============================================================================
+
+name = "fire-markdown"
+main = "src/index.js"
+
+# Use the latest compatibility date for access to newest runtime features.
+compatibility_date = "2026-02-24"
+
+# -----------------------------------------------------------------------------
+# No additional bindings needed. This worker is a stateless proxy that
+# fetches from the GitHub Pages origin and transforms responses.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Custom Domain (configure after initial deployment)
+# -----------------------------------------------------------------------------
+# routes = [
+#   { pattern = "docs.cleansingfire.org/*", zone_name = "cleansingfire.org" }
+# ]
+
+# -----------------------------------------------------------------------------
+# Environment variables
+# -----------------------------------------------------------------------------
+[vars]
+ORIGIN = "https://bedwards.github.io/cleansing-fire"
+
+# -----------------------------------------------------------------------------
+# Environment: Staging
+# -----------------------------------------------------------------------------
+# [env.staging]
+# name = "fire-markdown-staging"
+# [env.staging.vars]
+# ORIGIN = "https://bedwards.github.io/cleansing-fire"

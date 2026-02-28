@@ -1,0 +1,39 @@
+# Cleansing Fire
+
+> Decentralized technology to shift power from corrupt concentrated authority toward the people. A philosophy of Pyrrhic Lucidity: see clearly, act anyway, bear the cost. Agent-first, human-accessible. The human interface is Claude Code CLI.
+
+## Core Documentation
+
+- [Getting Started](https://bedwards.github.io/cleansing-fire/getting-started.md): Installation, setup, and first steps with Claude Code CLI
+- [Economics - The Ember Economy](https://bedwards.github.io/cleansing-fire/economics.md): Decentralized economic model with demurrage currency at 3 scales
+- [Decentralized Systems](https://bedwards.github.io/cleansing-fire/decentralized-systems.md): Network, biological, and governance system design patterns
+- [Technology Research](https://bedwards.github.io/cleansing-fire/technology-research.md): Technical landscape and tool analysis
+- [Global Architecture](https://bedwards.github.io/cleansing-fire/global-architecture.md): Master architecture across all four infrastructure layers
+
+## Investigation & Intelligence
+
+- [Corporate Power Map](https://bedwards.github.io/cleansing-fire/corporate-power-map.md): Where power actually lives -- SEC, ownership chains, dark money networks
+- [Intelligence and OSINT](https://bedwards.github.io/cleansing-fire/intelligence-and-osint.md): Open-source intelligence collection infrastructure
+- [Historical Research](https://bedwards.github.io/cleansing-fire/historical-research.md): Power rebalancing patterns through history
+
+## Protocols & Specifications
+
+- [Federation Protocol](https://bedwards.github.io/cleansing-fire/federation-protocol.md): Decentralized node federation specification
+- [Fork Protection](https://bedwards.github.io/cleansing-fire/fork-protection.md): Integrity preservation across forks
+- [Dual Documentation](https://bedwards.github.io/cleansing-fire/dual-documentation.md): Human + AI documentation architecture
+
+## Strategy & Theory
+
+- [Game Theory](https://bedwards.github.io/cleansing-fire/game-theory.md): Strategic interaction models for power dynamics
+- [Future Capabilities](https://bedwards.github.io/cleansing-fire/future-capabilities.md): Roadmap and planned features
+- [Blue Sky Vision](https://bedwards.github.io/cleansing-fire/blue-sky-vision.md): Long-term aspirational goals
+
+## Optional
+
+- [Art and Media](https://bedwards.github.io/cleansing-fire/art-and-media.md): Visual and media content generation
+- [Literary Arsenal](https://bedwards.github.io/cleansing-fire/literary-arsenal.md): Mottos, poems, slogans, manifestos, songs
+- [Humor and Satire](https://bedwards.github.io/cleansing-fire/humor-and-satire.md): Satire as a weapon against concentrated power
+- [Multimedia Tools](https://bedwards.github.io/cleansing-fire/multimedia-tools.md): Audio, video, and interactive media tools
+- [Cloudflare Implementation](https://bedwards.github.io/cleansing-fire/cloudflare-implementation.md): Edge infrastructure implementation plan
+- [Claude Code Features](https://bedwards.github.io/cleansing-fire/claude-code-features.md): Claude Code CLI capabilities guide
+- [Claude Code Tutorial](https://bedwards.github.io/cleansing-fire/claude-code-tutorial.md): Step-by-step Claude Code tutorial

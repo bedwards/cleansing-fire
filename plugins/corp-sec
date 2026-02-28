@@ -1,0 +1,739 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: SEC EDGAR Filing Analyzer
+
+Queries the SEC EDGAR full-text search and company filing APIs to fetch
+10-K, 10-Q, 8-K, and proxy (DEF 14A) filings. Extracts executive
+compensation, related-party transactions, risk factor disclosures,
+insider transactions, and beneficial ownership data.
+
+Why this matters:
+  Corporate power hides in plain sight inside SEC filings. Executive
+  pay packages, related-party deals, and risk-factor language reveal
+  what companies actually fear, who actually profits, and which
+  relationships they are legally required to disclose but try to bury
+  in 300-page documents. This plugin turns that opacity into structured,
+  searchable, cross-referenceable data.
+
+Plugin manifest:
+  name: corp-sec
+  category: osint
+  actions: [search, filings, company, executive_comp, related_party,
+            risk_factors, insider_transactions, beneficial_owners]
+  requires_env: [SEC_USER_AGENT]
+  uses_gatekeeper: true
+
+Input JSON:
+  {"action": "search", "query": "executive compensation clawback", "form_type": "10-K"}
+  {"action": "filings", "cik": "0000320193", "form_type": "10-K", "count": 5}
+  {"action": "company", "query": "Apple Inc"}
+  {"action": "executive_comp", "cik": "0000320193"}
+  {"action": "related_party", "cik": "0000320193"}
+  {"action": "risk_factors", "cik": "0000320193"}
+  {"action": "insider_transactions", "cik": "0000320193", "days": 90}
+  {"action": "beneficial_owners", "cik": "0000320193"}
+
+Output JSON: structured filing data with optional AI analysis
+
+SEC EDGAR is fully public. No API key required.
+A valid User-Agent string IS required (SEC policy).
+Set SEC_USER_AGENT env var, e.g. "CleansingFire admin@example.com"
+"""
+
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+# SEC EDGAR endpoints
+EFTS_BASE = "https://efts.sec.gov/LATEST"
+EDGAR_BASE = "https://data.sec.gov"
+EDGAR_ARCHIVES = "https://www.sec.gov/cgi-bin/browse-edgar"
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+# SEC requires a User-Agent header identifying the caller
+USER_AGENT = os.environ.get(
+    "SEC_USER_AGENT",
+    "CleansingFire/0.1 (https://github.com/bedwards/cleansing-fire)"
+)
+
+# Rate limiting: SEC asks for max 10 requests/second
+_last_request_time = 0.0
+
+
+def _rate_limit():
+    """Enforce SEC's 10 req/sec rate limit."""
+    global _last_request_time
+    now = time.time()
+    elapsed = now - _last_request_time
+    if elapsed < 0.12:
+        time.sleep(0.12 - elapsed)
+    _last_request_time = time.time()
+
+
+def sec_request(url, timeout=30):
+    """Make a rate-limited request to SEC EDGAR with proper User-Agent."""
+    _rate_limit()
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            # Some endpoints return JSON, others return HTML/text
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {"_raw_text": raw}
+    except urllib.error.HTTPError as e:
+        return {"error": f"SEC EDGAR HTTP {e.code}: {e.reason}", "error_code": "API_ERROR"}
+    except urllib.error.URLError as e:
+        return {"error": f"SEC EDGAR connection error: {e.reason}", "error_code": "API_ERROR"}
+    except Exception as e:
+        return {"error": f"SEC request failed: {e}", "error_code": "INTERNAL_ERROR"}
+
+
+def ask_gatekeeper(prompt, system="", temperature=0.2):
+    """Submit analysis prompt to the gatekeeper LLM."""
+    payload = {
+        "prompt": prompt,
+        "system": system or (
+            "You are a securities analyst and forensic accountant. "
+            "Analyze SEC filings for hidden power structures, excessive compensation, "
+            "related-party conflicts of interest, and risk disclosures that reveal "
+            "corporate misconduct or regulatory capture. Be precise. Cite specific "
+            "dollar amounts and names."
+        ),
+        "caller": "plugin:corp-sec",
+        "temperature": temperature,
+        "max_tokens": 2048,
+        "timeout": 180,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=190) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return f"[LLM Error: {body.get('error', 'unknown')}]"
+    except Exception as e:
+        return f"[Gatekeeper unavailable: {e}]"
+
+
+# ---------------------------------------------------------------------------
+# CIK / Company lookup
+# ---------------------------------------------------------------------------
+
+def normalize_cik(cik):
+    """Normalize CIK to 10-digit zero-padded string."""
+    cik_str = str(cik).strip().lstrip("0")
+    return cik_str.zfill(10)
+
+
+def search_companies(query):
+    """Search for companies by name or ticker using EDGAR full-text search."""
+    url = f"{EFTS_BASE}/search-index?q={urllib.parse.quote(query)}&dateRange=custom&startdt=2020-01-01&enddt=2026-12-31&forms=10-K"
+
+    # Use the company search endpoint instead
+    company_url = f"{EDGAR_BASE}/submissions/CIK{normalize_cik('0')}.json"
+
+    # The company tickers file is a better approach
+    tickers_url = "https://www.sec.gov/files/company_tickers.json"
+    result = sec_request(tickers_url)
+    if "error" in result:
+        return result
+
+    query_lower = query.lower()
+    matches = []
+    for _key, entry in result.items():
+        name = entry.get("title", "").lower()
+        ticker = entry.get("ticker", "").lower()
+        if query_lower in name or query_lower == ticker:
+            matches.append({
+                "cik": normalize_cik(entry.get("cik_str", "")),
+                "name": entry.get("title", ""),
+                "ticker": entry.get("ticker", ""),
+            })
+    matches = matches[:20]
+
+    return {"companies": matches, "count": len(matches), "query": query}
+
+
+def get_company_info(cik):
+    """Get company metadata from EDGAR submissions endpoint."""
+    cik_padded = normalize_cik(cik)
+    url = f"{EDGAR_BASE}/submissions/CIK{cik_padded}.json"
+    result = sec_request(url)
+    if "error" in result:
+        return result
+
+    return {
+        "cik": cik_padded,
+        "name": result.get("name", ""),
+        "ticker": (result.get("tickers", []) or [""])[0],
+        "sic": result.get("sic", ""),
+        "sic_description": result.get("sicDescription", ""),
+        "state": result.get("stateOfIncorporation", ""),
+        "fiscal_year_end": result.get("fiscalYearEnd", ""),
+        "exchanges": result.get("exchanges", []),
+        "ein": result.get("ein", ""),
+        "website": result.get("website", ""),
+        "category": result.get("category", ""),
+        "insider_transaction_count": result.get("insiderTransactionForIssuerCount", 0),
+        "insider_owner_count": result.get("insiderTransactionForOwnerCount", 0),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Filing search and retrieval
+# ---------------------------------------------------------------------------
+
+def search_filings_fulltext(query, form_type="", date_start="", date_end="", count=10):
+    """Full-text search across all EDGAR filings using EFTS."""
+    params = {
+        "q": query,
+        "forms": form_type,
+        "from": "0",
+        "size": str(min(count, 50)),
+    }
+    if date_start:
+        params["startdt"] = date_start
+    if date_end:
+        params["enddt"] = date_end
+
+    # Remove empty params
+    params = {k: v for k, v in params.items() if v}
+    query_string = urllib.parse.urlencode(params)
+    url = f"{EFTS_BASE}/search-index?{query_string}"
+
+    result = sec_request(url)
+    if "error" in result:
+        return result
+
+    hits = result.get("hits", {}).get("hits", [])
+    filings = []
+    for hit in hits:
+        src = hit.get("_source", {})
+        filings.append({
+            "form_type": src.get("form_type", ""),
+            "entity_name": src.get("entity_name", ""),
+            "file_date": src.get("file_date", ""),
+            "period_of_report": src.get("period_of_report", ""),
+            "file_number": src.get("file_num", ""),
+            "cik": src.get("entity_id", ""),
+            "filing_url": f"https://www.sec.gov/Archives/edgar/data/{src.get('entity_id', '')}/{src.get('file_num', '')}",
+        })
+
+    return {
+        "query": query,
+        "form_type": form_type,
+        "filings": filings,
+        "total": result.get("hits", {}).get("total", {}).get("value", 0),
+        "count": len(filings),
+    }
+
+
+def get_company_filings(cik, form_type="10-K", count=5):
+    """Get recent filings for a company from the submissions endpoint."""
+    cik_padded = normalize_cik(cik)
+    url = f"{EDGAR_BASE}/submissions/CIK{cik_padded}.json"
+    result = sec_request(url)
+    if "error" in result:
+        return result
+
+    recent = result.get("filings", {}).get("recent", {})
+    if not recent:
+        return {"error": "No filings found", "error_code": "API_ERROR"}
+
+    forms = recent.get("form", [])
+    dates = recent.get("filingDate", [])
+    accessions = recent.get("accessionNumber", [])
+    primary_docs = recent.get("primaryDocument", [])
+    descriptions = recent.get("primaryDocDescription", [])
+
+    filings = []
+    for i in range(len(forms)):
+        if form_type and forms[i] != form_type:
+            continue
+        accession_clean = accessions[i].replace("-", "")
+        filing = {
+            "form_type": forms[i],
+            "filing_date": dates[i],
+            "accession_number": accessions[i],
+            "primary_document": primary_docs[i] if i < len(primary_docs) else "",
+            "description": descriptions[i] if i < len(descriptions) else "",
+            "filing_url": f"https://www.sec.gov/Archives/edgar/data/{cik_padded}/{accession_clean}/{primary_docs[i] if i < len(primary_docs) else ''}",
+            "index_url": f"https://www.sec.gov/Archives/edgar/data/{cik_padded}/{accession_clean}/",
+        }
+        filings.append(filing)
+        if len(filings) >= count:
+            break
+
+    company_name = result.get("name", "")
+    return {
+        "cik": cik_padded,
+        "company": company_name,
+        "form_type": form_type,
+        "filings": filings,
+        "count": len(filings),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Executive Compensation extraction
+# ---------------------------------------------------------------------------
+
+def extract_executive_comp(cik):
+    """Extract executive compensation from the most recent proxy (DEF 14A) or 10-K."""
+    cik_padded = normalize_cik(cik)
+
+    # First try DEF 14A (proxy statement - best source for comp)
+    proxy = get_company_filings(cik_padded, form_type="DEF 14A", count=1)
+
+    # Also get the latest 10-K
+    annual = get_company_filings(cik_padded, form_type="10-K", count=1)
+
+    company_info = get_company_info(cik_padded)
+    company_name = company_info.get("name", cik_padded) if "error" not in company_info else cik_padded
+
+    # Try to fetch the proxy filing text for LLM analysis
+    filing_text = ""
+    filing_source = ""
+    if proxy.get("filings"):
+        filing_url = proxy["filings"][0].get("filing_url", "")
+        filing_source = f"DEF 14A filed {proxy['filings'][0].get('filing_date', '')}"
+        text_result = sec_request(filing_url, timeout=45)
+        if "_raw_text" in text_result:
+            filing_text = text_result["_raw_text"][:50000]  # First 50KB
+    elif annual.get("filings"):
+        filing_url = annual["filings"][0].get("filing_url", "")
+        filing_source = f"10-K filed {annual['filings'][0].get('filing_date', '')}"
+        text_result = sec_request(filing_url, timeout=45)
+        if "_raw_text" in text_result:
+            filing_text = text_result["_raw_text"][:50000]
+
+    # Extract compensation section via pattern matching
+    comp_section = ""
+    if filing_text:
+        # Common patterns for compensation tables
+        patterns = [
+            r"(?i)(summary\s+compensation\s+table.*?)(?=\n\s*\n\s*\n|\Z)",
+            r"(?i)(executive\s+compensation.*?)(?=\n\s*(?:item\s+\d|\Z))",
+            r"(?i)(named\s+executive\s+officer.*?compensation.*?)(?=\n\s*\n\s*\n|\Z)",
+        ]
+        for pat in patterns:
+            match = re.search(pat, filing_text[:30000], re.DOTALL)
+            if match:
+                comp_section = match.group(1)[:8000]
+                break
+
+    # Use LLM to extract structured compensation data
+    analysis = None
+    if comp_section or filing_text:
+        text_for_analysis = comp_section if comp_section else filing_text[:15000]
+        analysis = ask_gatekeeper(f"""Extract executive compensation data from this SEC filing for {company_name}.
+
+Source: {filing_source}
+
+Filing text (excerpt):
+{text_for_analysis[:12000]}
+
+Extract and structure:
+1. Named Executive Officers (NEOs) and their titles
+2. For each NEO: base salary, bonus, stock awards, option awards, non-equity incentive, pension/deferred comp, other comp, TOTAL
+3. CEO-to-median-employee pay ratio (if disclosed)
+4. Golden parachute / change-of-control provisions
+5. Clawback policies
+6. Any related-party compensation arrangements
+
+Output as structured analysis. Flag any compensation that appears excessive relative to company performance. Identify any compensation structures that create perverse incentives.""")
+
+    return {
+        "cik": cik_padded,
+        "company": company_name,
+        "filing_source": filing_source,
+        "proxy_filings": proxy.get("filings", []),
+        "annual_filings": annual.get("filings", []),
+        "compensation_section_found": bool(comp_section),
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Related-Party Transactions
+# ---------------------------------------------------------------------------
+
+def extract_related_party(cik):
+    """Extract related-party transactions from the most recent 10-K."""
+    cik_padded = normalize_cik(cik)
+    annual = get_company_filings(cik_padded, form_type="10-K", count=1)
+
+    company_info = get_company_info(cik_padded)
+    company_name = company_info.get("name", cik_padded) if "error" not in company_info else cik_padded
+
+    filing_text = ""
+    filing_source = ""
+    if annual.get("filings"):
+        filing_url = annual["filings"][0].get("filing_url", "")
+        filing_source = f"10-K filed {annual['filings'][0].get('filing_date', '')}"
+        text_result = sec_request(filing_url, timeout=45)
+        if "_raw_text" in text_result:
+            filing_text = text_result["_raw_text"]
+
+    # Extract related-party section
+    rpt_section = ""
+    if filing_text:
+        patterns = [
+            r"(?i)(related[\s-]+party\s+transactions.*?)(?=\n\s*(?:item\s+\d|part\s+[iv]|\Z))",
+            r"(?i)(certain\s+relationships\s+and\s+related\s+transactions.*?)(?=\n\s*(?:item\s+\d|part\s+[iv]|\Z))",
+            r"(?i)(transactions\s+with\s+related\s+persons.*?)(?=\n\s*(?:item\s+\d|part\s+[iv]|\Z))",
+        ]
+        for pat in patterns:
+            match = re.search(pat, filing_text, re.DOTALL)
+            if match:
+                rpt_section = match.group(1)[:10000]
+                break
+
+    analysis = None
+    if rpt_section:
+        analysis = ask_gatekeeper(f"""Analyze related-party transactions from this SEC filing for {company_name}.
+
+Source: {filing_source}
+
+Filing text (related-party section):
+{rpt_section[:10000]}
+
+Extract:
+1. Every related-party transaction: who, what, how much, what relationship
+2. Transactions involving board members or their family members
+3. Transactions involving major shareholders (>5%)
+4. Loans to or from executives or directors
+5. Contracts with entities where officers/directors have interests
+6. Real estate transactions with related parties
+
+For each transaction, assess:
+- Is this arms-length or does it smell like self-dealing?
+- What is the conflict of interest?
+- How material is this to the company?
+- Would an independent board have approved this?
+
+Flag anything that looks like insider enrichment or corporate capture.""")
+
+    return {
+        "cik": cik_padded,
+        "company": company_name,
+        "filing_source": filing_source,
+        "related_party_section_found": bool(rpt_section),
+        "section_length": len(rpt_section),
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Risk Factors
+# ---------------------------------------------------------------------------
+
+def extract_risk_factors(cik):
+    """Extract and analyze risk factor disclosures from 10-K."""
+    cik_padded = normalize_cik(cik)
+    annual = get_company_filings(cik_padded, form_type="10-K", count=1)
+
+    company_info = get_company_info(cik_padded)
+    company_name = company_info.get("name", cik_padded) if "error" not in company_info else cik_padded
+
+    filing_text = ""
+    filing_source = ""
+    if annual.get("filings"):
+        filing_url = annual["filings"][0].get("filing_url", "")
+        filing_source = f"10-K filed {annual['filings'][0].get('filing_date', '')}"
+        text_result = sec_request(filing_url, timeout=45)
+        if "_raw_text" in text_result:
+            filing_text = text_result["_raw_text"]
+
+    # Extract risk factors section (Item 1A)
+    risk_section = ""
+    if filing_text:
+        patterns = [
+            r"(?i)(?:item\s+1a\.?\s*[-—]?\s*risk\s+factors)(.*?)(?=item\s+1b|item\s+2\.?\s)",
+            r"(?i)(risk\s+factors\s*\n.*?)(?=\n\s*(?:item\s+\d|part\s+[iv]))",
+        ]
+        for pat in patterns:
+            match = re.search(pat, filing_text, re.DOTALL)
+            if match:
+                risk_section = match.group(1)[:20000]
+                break
+
+    analysis = None
+    if risk_section:
+        analysis = ask_gatekeeper(f"""Analyze the risk factor disclosures from {company_name}'s SEC filing.
+
+Source: {filing_source}
+
+Risk Factors section (excerpt):
+{risk_section[:15000]}
+
+Perform a critical analysis:
+1. Categorize risks: regulatory, legal, financial, operational, reputational, environmental, cybersecurity
+2. What are they ACTUALLY afraid of? Read between the boilerplate.
+3. Which risks suggest ongoing misconduct or regulatory violations?
+4. Which risks are new or recently added (look for specificity vs boilerplate)?
+5. Are there risks related to government investigations, lawsuits, or enforcement actions?
+6. Do any risks suggest anticompetitive behavior, monopoly concerns, or market manipulation?
+7. Are there environmental or labor risks they're trying to minimize?
+8. Rate each major risk category by likelihood and severity.
+9. What does this risk section reveal about the company's actual power and vulnerabilities?
+
+Focus on risks that are relevant to corporate accountability and public interest.""")
+
+    return {
+        "cik": cik_padded,
+        "company": company_name,
+        "filing_source": filing_source,
+        "risk_factors_section_found": bool(risk_section),
+        "section_length": len(risk_section),
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Insider Transactions (Forms 3, 4, 5)
+# ---------------------------------------------------------------------------
+
+def get_insider_transactions(cik, days=90):
+    """Get recent insider transactions for a company."""
+    cik_padded = normalize_cik(cik)
+
+    company_info = get_company_info(cik_padded)
+    company_name = company_info.get("name", cik_padded) if "error" not in company_info else cik_padded
+
+    # Get Form 4 filings (insider transactions)
+    filings = get_company_filings(cik_padded, form_type="4", count=20)
+
+    transactions = []
+    if filings.get("filings"):
+        for filing in filings["filings"]:
+            transactions.append({
+                "form_type": filing.get("form_type"),
+                "filing_date": filing.get("filing_date"),
+                "description": filing.get("description", ""),
+                "filing_url": filing.get("filing_url"),
+            })
+
+    # Also get Form 3 (initial ownership) and Form 5 (annual)
+    form3 = get_company_filings(cik_padded, form_type="3", count=5)
+    form5 = get_company_filings(cik_padded, form_type="5", count=5)
+
+    initial_ownership = form3.get("filings", [])
+    annual_ownership = form5.get("filings", [])
+
+    analysis = None
+    if transactions:
+        tx_summary = "\n".join(
+            f"- {t['filing_date']}: {t['description']} ({t['form_type']})"
+            for t in transactions[:15]
+        )
+        analysis = ask_gatekeeper(f"""Analyze insider transaction patterns for {company_name} (CIK: {cik_padded}).
+
+Recent Form 4 filings (insider trades):
+{tx_summary}
+
+Number of Form 3 (initial ownership) filings: {len(initial_ownership)}
+Number of Form 5 (annual) filings: {len(annual_ownership)}
+Total insider transaction count: {company_info.get('insider_transaction_count', 'unknown')}
+Total insider owner count: {company_info.get('insider_owner_count', 'unknown')}
+
+Analyze:
+1. Are insiders buying or selling? What is the net direction?
+2. Is there a cluster of sales that might indicate insiders know something negative?
+3. Are there any suspicious timing patterns (e.g., sales before bad news)?
+4. Which insiders are most active? What are their roles?
+5. Are there any 10b5-1 plan disclosures?
+6. Flag any transaction patterns that warrant further investigation.
+
+Note: Detailed transaction amounts require parsing individual Form 4 XML filings.""")
+
+    return {
+        "cik": cik_padded,
+        "company": company_name,
+        "form4_filings": transactions,
+        "form3_count": len(initial_ownership),
+        "form5_count": len(annual_ownership),
+        "total_insider_transactions": company_info.get("insider_transaction_count", 0),
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Beneficial Ownership (Schedule 13D/13G)
+# ---------------------------------------------------------------------------
+
+def get_beneficial_owners(cik):
+    """Get beneficial ownership filings (who owns >5% of the company)."""
+    cik_padded = normalize_cik(cik)
+
+    company_info = get_company_info(cik_padded)
+    company_name = company_info.get("name", cik_padded) if "error" not in company_info else cik_padded
+
+    # Get Schedule 13D (activist/control ownership) and 13G (passive ownership)
+    sched_13d = get_company_filings(cik_padded, form_type="SC 13D", count=10)
+    sched_13g = get_company_filings(cik_padded, form_type="SC 13G", count=10)
+
+    # Also check for SC 13D/A (amendments)
+    sched_13da = get_company_filings(cik_padded, form_type="SC 13D/A", count=10)
+    sched_13ga = get_company_filings(cik_padded, form_type="SC 13G/A", count=10)
+
+    active_owners = sched_13d.get("filings", []) + sched_13da.get("filings", [])
+    passive_owners = sched_13g.get("filings", []) + sched_13ga.get("filings", [])
+
+    analysis = None
+    if active_owners or passive_owners:
+        owners_text = "ACTIVIST/CONTROL OWNERS (Schedule 13D):\n"
+        for f in active_owners[:10]:
+            owners_text += f"- {f.get('filing_date', '')}: {f.get('description', '')} [{f.get('filing_url', '')}]\n"
+
+        owners_text += "\nPASSIVE OWNERS (Schedule 13G):\n"
+        for f in passive_owners[:10]:
+            owners_text += f"- {f.get('filing_date', '')}: {f.get('description', '')} [{f.get('filing_url', '')}]\n"
+
+        analysis = ask_gatekeeper(f"""Analyze beneficial ownership structure of {company_name} (CIK: {cik_padded}).
+
+{owners_text}
+
+Analyze:
+1. Who are the major shareholders (>5%)?
+2. Which are activist investors (13D) vs passive (13G)?
+3. Are there any institutional investors with potential conflicts of interest?
+4. Is there concentrated ownership that could indicate control?
+5. Have any major holders recently increased or decreased their positions?
+6. Are there any cross-ownership patterns with other companies?
+7. What does the ownership structure tell us about who really controls this company?
+
+Note: Detailed ownership percentages require parsing individual 13D/13G filings.""")
+
+    return {
+        "cik": cik_padded,
+        "company": company_name,
+        "activist_owners_13d": active_owners,
+        "passive_owners_13g": passive_owners,
+        "activist_count": len(active_owners),
+        "passive_count": len(passive_owners),
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
+
+def emit_error(msg, code="INVALID_INPUT"):
+    """Emit a structured error and exit."""
+    json.dump({"error": msg, "error_code": code}, sys.stdout, indent=2)
+    sys.exit(1)
+
+
+def main():
+    # Read input
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            emit_error("No input provided. Send JSON with an 'action' field on stdin.", "MISSING_FIELD")
+        input_data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        emit_error(f"Invalid JSON input: {e}", "INVALID_INPUT")
+
+    action = input_data.get("action", "")
+    if not action:
+        emit_error("Missing 'action' field. Valid actions: search, filings, company, executive_comp, related_party, risk_factors, insider_transactions, beneficial_owners", "MISSING_FIELD")
+
+    # Dispatch
+    if action == "search":
+        query = input_data.get("query", "")
+        if not query:
+            emit_error("'search' action requires a 'query' field.", "MISSING_FIELD")
+        result = search_filings_fulltext(
+            query=query,
+            form_type=input_data.get("form_type", ""),
+            date_start=input_data.get("date_start", ""),
+            date_end=input_data.get("date_end", ""),
+            count=input_data.get("count", 10),
+        )
+
+    elif action == "filings":
+        cik = input_data.get("cik", "")
+        if not cik:
+            emit_error("'filings' action requires a 'cik' field.", "MISSING_FIELD")
+        result = get_company_filings(
+            cik=cik,
+            form_type=input_data.get("form_type", "10-K"),
+            count=input_data.get("count", 5),
+        )
+
+    elif action == "company":
+        query = input_data.get("query", "")
+        cik = input_data.get("cik", "")
+        if cik:
+            result = get_company_info(cik)
+        elif query:
+            result = search_companies(query)
+        else:
+            emit_error("'company' action requires 'query' or 'cik' field.", "MISSING_FIELD")
+
+    elif action == "executive_comp":
+        cik = input_data.get("cik", "")
+        if not cik:
+            emit_error("'executive_comp' action requires a 'cik' field.", "MISSING_FIELD")
+        result = extract_executive_comp(cik)
+
+    elif action == "related_party":
+        cik = input_data.get("cik", "")
+        if not cik:
+            emit_error("'related_party' action requires a 'cik' field.", "MISSING_FIELD")
+        result = extract_related_party(cik)
+
+    elif action == "risk_factors":
+        cik = input_data.get("cik", "")
+        if not cik:
+            emit_error("'risk_factors' action requires a 'cik' field.", "MISSING_FIELD")
+        result = extract_risk_factors(cik)
+
+    elif action == "insider_transactions":
+        cik = input_data.get("cik", "")
+        if not cik:
+            emit_error("'insider_transactions' action requires a 'cik' field.", "MISSING_FIELD")
+        result = get_insider_transactions(cik, days=input_data.get("days", 90))
+
+    elif action == "beneficial_owners":
+        cik = input_data.get("cik", "")
+        if not cik:
+            emit_error("'beneficial_owners' action requires a 'cik' field.", "MISSING_FIELD")
+        result = get_beneficial_owners(cik)
+
+    else:
+        emit_error(
+            f"Unknown action: '{action}'. Valid actions: search, filings, company, "
+            "executive_comp, related_party, risk_factors, insider_transactions, beneficial_owners",
+            "UNKNOWN_ACTION",
+        )
+
+    # Output
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
