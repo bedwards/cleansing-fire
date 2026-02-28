@@ -5,7 +5,7 @@
   "last_updated": "2026-02-28",
   "protected_files": {
     "CLAUDE.md": {
-      "sha256": "7426f4521f2737a2e23a87784913ee15d7a13dbcbe7532f953f490cf1b45bbfa",
+      "sha256": "1e8528180f378d101f36f4583df9ec629ed796fe7f114d3b0729fce0c64aafe7",
       "description": "Project constitution. Contains the 7 Principles, mission, architecture, and conventions.",
       "protection_level": "critical"
     },
@@ -38,6 +38,31 @@
       "sha256": "01bbd4b47db1a485922ac5ae37f548da7c0c88dba3dd0a18a55a53ff59f7a248",
       "description": "Literary arsenal. Mottos, poems, slogans, manifestos.",
       "protection_level": "standard"
+    },
+    "docs/federation-protocol.md": {
+      "sha256": "07b9116417aa3d46574c181dce6ffe9cdbdaa09d458245f8454e91b7cf50d504",
+      "description": "FireWire federation protocol specification. Node discovery, gossip, trust.",
+      "protection_level": "high"
+    },
+    "docs/adversarial-resilience.md": {
+      "sha256": "8254d50a48558e66d440c58ca1263f599634ebd3b9c26f5d3140c90b7a6599c5",
+      "description": "War manual. Threat modeling, real-world takedowns, anti-fragile design, incident response.",
+      "protection_level": "high"
+    },
+    "docs/zero-touch-bootstrap.md": {
+      "sha256": "8db25a69fab3ba40662c1ad0278c80bc4d0b0de482574d057cd94f19d194bb91",
+      "description": "THE CENTRAL PIECE. One-command node deployment architecture.",
+      "protection_level": "critical"
+    },
+    "specs/agent-capabilities.yaml": {
+      "sha256": "12ef1f820c56472738b664a7beec71b7261afb1056fa18857686f7ac3ca4240b",
+      "description": "Agent safety boundaries and capability manifest.",
+      "protection_level": "critical"
+    },
+    "specs/goals.yaml": {
+      "sha256": "c51bd4f68a9969d0ea223404c9b3388b26b09c491638fd12a670039a929d3f24",
+      "description": "Project goal hierarchy with success criteria.",
+      "protection_level": "high"
     }
   },
   "required_principles": [
