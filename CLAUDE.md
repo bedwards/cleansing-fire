@@ -31,10 +31,11 @@ Claude Code CLI is the human interface to this system. Humans learn to use Claud
 
 ### Core Infrastructure
 - **Gatekeeper Daemon** (`daemon/gatekeeper.py`) - HTTP server on port 7800 that serializes GPU access to local Ollama. Short queue (5), rejects on overflow. Endpoints: POST /submit, POST /submit-sync, GET /task/{id}, GET /health
+- **FireWire Daemon** (`daemon/firewire.py`, 1124 lines) - Federation protocol daemon on port 7801. Ed25519 message signing, gossip propagation, append-only log, intelligence sharing, task coordination, peer discovery. Pure stdlib Python.
+- **Scheduler** (`scheduler/scheduler.py`, 533 lines) - Autonomous operation loop: 25 tasks across 6 categories (sense/analyze/create/distribute/improve/system). Claude Code executor, HTTP poll events, status API on port 7802. The SENSE->ANALYZE->CREATE->DISTRIBUTE->IMPROVE->REPEAT cycle.
 - **CLI Client** (`bin/fire-ask`) - Command-line interface to gatekeeper
-- **Scheduler** (`scheduler/scheduler.py`) - Cron-like task scheduling + event-driven tasks
 - **Worker Orchestrator** (`workers/orchestrator.sh`) - Launches Claude Code workers in git worktrees
-- **Plugin System** (`plugins/`) - Executable scripts that accept JSON stdin, produce JSON stdout
+- **Plugin System** (`plugins/`, 16 plugins) - Executable scripts that accept JSON stdin, produce JSON stdout
 
 ### Intelligence & Exposure
 - **OSINT Pipeline** - Automated open-source intelligence collection
@@ -130,14 +131,14 @@ cleansing-fire/
 │   ├── settings.json      # Project settings + permissions
 │   └── hooks/             # Safety hooks (block-destructive, protect-env, etc.)
 ├── .github/workflows/     # GitHub Actions (Cloudflare deployment)
-├── daemon/                # Gatekeeper daemon (port 7800)
-├── scheduler/             # Task scheduling system
+├── daemon/                # Gatekeeper (7800), FireWire (7801), launchd plists
+├── scheduler/             # Autonomous operation loop (25 tasks, status API on 7802)
 ├── workers/               # Worker orchestration
 ├── plugins/               # Plugin executables (JSON stdin/stdout)
 │   ├── civic-*            # Government/civic data plugins
 │   ├── forge-*            # Content generation plugins
 │   └── pipeline-*         # Multi-plugin pipelines
-├── scripts/               # Management and automation scripts (9 scripts)
+├── scripts/               # Management and automation scripts (12 scripts)
 ├── bin/                   # CLI tools (fire-ask)
 ├── edge/                  # Cloudflare Workers
 │   ├── fire-api/          # REST API gateway
@@ -146,7 +147,7 @@ cleansing-fire/
 │   ├── index.html         # Split landing page (human + AI)
 │   ├── humans.html        # Human portal (chat, TTS, accessibility)
 │   ├── agents.html        # AI agent portal (bootstrap, specs, workflow)
-│   └── *.md               # 23 research documents
+│   └── *.md               # 26 research documents
 └── specs/                 # AI-readable specifications
     ├── project-graph.yaml
     ├── plugin-schema.json
@@ -156,21 +157,30 @@ cleansing-fire/
 
 ### Running Services
 ```bash
-# Start gatekeeper daemon
-scripts/gatekeeper-ctl.sh install  # or:
-python3 daemon/gatekeeper.py
+# Start all daemons
+scripts/gatekeeper-ctl.sh start    # Ollama gatekeeper on :7800
+scripts/firewire-ctl.sh start     # Federation daemon on :7801
+scripts/scheduler-ctl.sh start    # Autonomous scheduler on :7802
+
+# Or bootstrap everything at once
+bootstrap/setup-node.sh
+
+# Scheduler control
+scripts/scheduler-ctl.sh status   # Show stats and active tasks
+scripts/scheduler-ctl.sh tasks    # List all 25 configured tasks
+scripts/scheduler-ctl.sh results  # Recent task execution results
+scripts/scheduler-ctl.sh reload   # Reload tasks.json without restart
+
+# FireWire control
+scripts/firewire-ctl.sh peers     # Show connected peers
+scripts/firewire-ctl.sh announce <address>  # Connect to a peer
 
 # Test gatekeeper
 bin/fire-ask --status
 bin/fire-ask --sync "test prompt"
 
-# Start scheduler
-python3 scheduler/scheduler.py
-
-# Launch implementation worker
+# Launch workers
 workers/orchestrator.sh implement "Task title" "Description"
-
-# Launch review worker
 workers/orchestrator.sh review <pr-number>
 ```
 
@@ -220,7 +230,9 @@ Separate from GitHub Pages — these handle compute, API, and AI inference at th
 - `docs/fork-protection.md` - Integrity verification, web of trust
 - `docs/movement-strategy.md` - Movement building strategy (1945 lines)
 - `docs/disinformation-defense.md` - Disinformation detection and counter-strategies (835 lines)
+- `docs/zero-touch-bootstrap.md` - THE CENTRAL PIECE: one-command node deployment (2163 lines)
 - `docs/chaos-research.md` - Serendipity methodology, random research angles (1246 lines)
+- `docs/digital-rights-law.md` - CFAA, whistleblower protections, FOIA, legal survival guide (818 lines)
 - `docs/multimedia-tools.md` - Media generation tools research
 - `docs/getting-started.md` - Human onboarding guide
 - `docs/claude-code-tutorial.md` - CLI tutorial for beginners

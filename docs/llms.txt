@@ -4,6 +4,7 @@
 
 ## Core Documentation
 
+- [Zero-Touch Bootstrap](https://bedwards.github.io/cleansing-fire/zero-touch-bootstrap.md): THE CENTRAL PIECE -- one command deploys a complete autonomous node. Architecture, bootstrap sequence, autonomous loop, network topology, security, cost analysis.
 - [Getting Started](https://bedwards.github.io/cleansing-fire/getting-started.md): Installation, setup, and first steps with Claude Code CLI
 - [Economics - The Ember Economy](https://bedwards.github.io/cleansing-fire/economics.md): Decentralized economic model with demurrage currency at 3 scales
 - [Decentralized Systems](https://bedwards.github.io/cleansing-fire/decentralized-systems.md): Network, biological, and governance system design patterns
@@ -31,6 +32,7 @@
 - [Game Theory](https://bedwards.github.io/cleansing-fire/game-theory.md): Strategic interaction models for power dynamics
 - [Movement Strategy](https://bedwards.github.io/cleansing-fire/movement-strategy.md): Coalition building, digital organizing, narrative warfare, escalation, security culture
 - [Disinformation Defense](https://bedwards.github.io/cleansing-fire/disinformation-defense.md): Detection methods, counter-strategies, building resilience
+- [Digital Rights Law](https://bedwards.github.io/cleansing-fire/digital-rights-law.md): CFAA, whistleblower protections, FOIA, anti-SLAPP -- legal survival guide
 - [Future Capabilities](https://bedwards.github.io/cleansing-fire/future-capabilities.md): Roadmap and planned features
 - [Blue Sky Vision](https://bedwards.github.io/cleansing-fire/blue-sky-vision.md): Long-term aspirational goals
 - [Chaos Research](https://bedwards.github.io/cleansing-fire/chaos-research.md): Serendipity methodology, random research angles, emergent patterns
