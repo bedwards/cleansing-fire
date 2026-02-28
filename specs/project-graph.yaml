@@ -65,19 +65,27 @@ components:
       - ollama  # external dependency
 
   scheduler:
-    name: "Task Scheduler"
+    name: "Autonomous Task Scheduler"
     path: "scheduler/scheduler.py"
     status: prototype
     description: >
-      Cron-like scheduled tasks and event-driven tasks.
-      Executes via plugins, shell commands, gatekeeper, or orchestrator.
-      Tasks defined in scheduler/tasks.json.
+      Autonomous operation loop: 25 tasks across 6 categories
+      (sense/analyze/create/distribute/improve/system). Executes via
+      5 executor types: shell, gatekeeper, orchestrator, plugin, claude.
+      Claude Code executor with concurrency limiting (max 2). Status API
+      on port 7802. SIGHUP config reload. 655 lines.
     provides:
-      - "Cron-style task scheduling"
-      - "Event-driven task triggering (file watcher, webhooks)"
+      - "Cron-style task scheduling (25 tasks)"
+      - "Event-driven task triggering (FileEvent, HttpPollEvent)"
       - "Plugin execution coordination"
       - "Gatekeeper integration for LLM tasks"
+      - "Claude Code executor for autonomous AI tasks"
+      - "Status API on port 7802 (/health, /status, /tasks, /results, POST /reload)"
+      - "Task statistics tracking by category and type"
     config_file: "scheduler/tasks.json"
+    config:
+      port: 7802
+      max_concurrent_claude: 2
     depends_on:
       - gatekeeper-daemon  # for LLM tasks
       - plugin-system      # for plugin execution
@@ -366,19 +374,244 @@ components:
     description: "Repository hosting, issue tracking, PR workflow."
     note: "gh CLI must be authenticated"
 
-  # --- Future Components ---
+  # --- Federation Infrastructure ---
 
-  federation-protocol:
-    name: "Federation Protocol"
-    path: null  # not yet created
-    status: concept
+  firewire-daemon:
+    name: "FireWire Federation Daemon"
+    path: "daemon/firewire.py"
+    status: prototype
     description: >
-      Protocol for Cleansing Fire nodes to discover each other, share data,
-      coordinate investigations, and distribute content. Designed for
-      censorship resistance and decentralization.
+      Federation protocol daemon on localhost:7801. Ed25519 message signing,
+      gossip propagation with peer management, append-only log, intelligence
+      sharing (up to 1000 items), task coordination with claim lifecycle,
+      message deduplication (5000 entry cache). 1124 lines.
+    provides:
+      - "Peer discovery and management"
+      - "Ed25519 message signing and verification"
+      - "Gossip-based message propagation"
+      - "Intelligence sharing across nodes"
+      - "Task coordination with claim lifecycle"
+      - "Append-only audit log"
+    endpoints:
+      - method: POST
+        path: /message
+        description: "Accept and propagate signed messages"
+      - method: GET
+        path: /peers
+        description: "List known peers with status"
+      - method: POST
+        path: /peers/announce
+        description: "Register a new peer"
+      - method: GET
+        path: /log
+        description: "Read append-only event log"
+      - method: GET
+        path: /health
+        description: "Health check with stats"
+      - method: POST
+        path: /intelligence
+        description: "Share intelligence items"
+      - method: GET
+        path: /tasks
+        description: "List coordinated tasks"
+      - method: POST
+        path: /tasks/claim
+        description: "Claim a task for this node"
+    config:
+      port: 7801
+      gossip_interval: 60
+      peer_staleness_threshold: 300
+      max_intelligence_items: 1000
+      max_dedup_cache: 5000
+    depends_on: []  # standalone, uses openssl for crypto
+
+  fire-message-cli:
+    name: "Encrypted Messaging CLI"
+    path: "bin/fire-message"
+    status: prototype
+    description: >
+      Node-to-node encrypted messaging over FireWire. Ed25519 signing,
+      AES-256-CBC encryption. Commands: send, inbox, read, peers,
+      broadcast, threads. 823 lines.
+    provides:
+      - "Encrypted peer-to-peer messaging"
+      - "Message inbox with read/unread tracking"
+      - "Broadcast to all peers"
+      - "Conversation thread view"
+    depends_on:
+      - firewire-daemon
+
+  plugin-firewire-relay:
+    name: "FireWire Relay Plugin"
+    path: "plugins/firewire-relay"
+    status: prototype
+    category: federation
+    description: >
+      Plugin wrapper for FireWire daemon. Actions: announce, broadcast,
+      share-intelligence, get-peers, get-intelligence. 326 lines.
+    depends_on:
+      - firewire-daemon
+      - plugin-system
+
+  # --- Plugins (Content Generation) ---
+
+  plugin-forge-satire:
+    name: "The Forge: Satire Generator"
+    path: "plugins/forge-satire"
+    status: prototype
+    category: forge
+    description: >
+      Civic comedy engine. Corporate doublespeak translator, meme text
+      generator, institutional parody (press releases, memos, FAQs),
+      satirical headlines (Onion/Borowitz/Reductress style), data-driven
+      roasts. Safety rails built in. 889 lines.
+    actions:
+      - name: satirize
+        input: '{"action": "satirize", "text": "...", "style": "corporate|government|military|tech"}'
+      - name: meme-text
+        input: '{"action": "meme-text", "topic": "...", "format": "top-bottom|reaction|expanding-brain|drake"}'
+      - name: parody
+        input: '{"action": "parody", "target": "...", "format": "press-release|memo|mission-statement|faq"}'
+      - name: headline
+        input: '{"action": "headline", "topic": "...", "count": 5, "style": "onion|borowitz|reductress"}'
+      - name: roast
+        input: '{"action": "roast", "entity": "...", "data": {...}}'
     depends_on:
       - gatekeeper-daemon
       - plugin-system
+
+  # --- Plugins (Social Distribution) ---
+
+  plugin-social-bluesky:
+    name: "Bluesky Distribution"
+    path: "plugins/social-bluesky"
+    status: prototype
+    category: distribution
+    description: >
+      AT Protocol integration for Bluesky. Post, thread, profile lookup,
+      timeline, search. Rich-text facet parsing (URLs, @mentions, #hashtags).
+      Session management with auto-refresh. 772 lines.
+    actions:
+      - name: post
+        input: '{"action": "post", "text": "..."}'
+      - name: thread
+        input: '{"action": "thread", "posts": [...]}'
+      - name: profile
+        input: '{"action": "profile", "handle": "..."}'
+      - name: timeline
+        input: '{"action": "timeline"}'
+      - name: search
+        input: '{"action": "search", "query": "..."}'
+    requires_env:
+      - BLUESKY_HANDLE
+      - BLUESKY_APP_PASSWORD
+    depends_on:
+      - plugin-system
+
+  plugin-social-mastodon:
+    name: "Mastodon Distribution"
+    path: "plugins/social-mastodon"
+    status: prototype
+    category: distribution
+    description: >
+      Mastodon API integration. Post, thread, timeline, search, trending.
+      Visibility controls, HTML stripping, cursor pagination. 621 lines.
+    actions:
+      - name: post
+        input: '{"action": "post", "text": "...", "visibility": "public|unlisted|private"}'
+      - name: thread
+        input: '{"action": "thread", "posts": [...]}'
+      - name: timeline
+        input: '{"action": "timeline"}'
+      - name: search
+        input: '{"action": "search", "query": "..."}'
+      - name: trending
+        input: '{"action": "trending"}'
+    requires_env:
+      - MASTODON_INSTANCE
+      - MASTODON_ACCESS_TOKEN
+    depends_on:
+      - plugin-system
+
+  # --- Plugins (Legal) ---
+
+  plugin-legal-automation:
+    name: "Legal Automation Suite"
+    path: "plugins/legal-automation"
+    status: prototype
+    category: legal
+    description: >
+      Civic legal action automation. FOIA request generation, regulatory
+      complaints (FTC/FCC/SEC/EPA/CFPB), know-your-rights cards,
+      cease-and-desist responses, public comments for regulations.gov.
+      Proper legal disclaimers and actual statute citations. 1222 lines.
+    actions:
+      - name: foia-generate
+        input: '{"action": "foia-generate", "agency": "...", "subject": "..."}'
+      - name: complaint-draft
+        input: '{"action": "complaint-draft", "type": "FTC|SEC|...", "subject": "..."}'
+      - name: rights-card
+        input: '{"action": "rights-card", "scenario": "protest|police-encounter|..."}'
+      - name: cease-desist-respond
+        input: '{"action": "cease-desist-respond", "threat_type": "defamation|copyright|..."}'
+      - name: public-comment
+        input: '{"action": "public-comment", "docket": "...", "agency": "..."}'
+    depends_on:
+      - gatekeeper-daemon
+      - plugin-system
+
+  # --- Edge Infrastructure ---
+
+  fire-relay:
+    name: "Federation Bootstrap Relay (Cloudflare Worker)"
+    path: "edge/fire-relay/"
+    status: prototype
+    description: >
+      Cloudflare Worker serving as a bootstrap relay for the FireWire
+      federation. Nodes register here to find peers. KV-based node
+      registry with TTL expiration, D1 audit log, rate limiting.
+      NOT a central authority -- a convenience bootstrap point.
+    provides:
+      - "Node registration with TTL expiration"
+      - "Peer bootstrap for new nodes"
+      - "Intelligence relay between nodes"
+      - "Rate limiting and blocklist"
+      - "D1 audit logging"
+    endpoints:
+      - method: POST
+        path: /nodes/register
+        description: "Register a node"
+      - method: GET
+        path: /nodes
+        description: "List active nodes"
+      - method: GET
+        path: /peers/bootstrap
+        description: "Get bootstrap peers for new node"
+      - method: POST
+        path: /nodes/:id/heartbeat
+        description: "Keep-alive heartbeat"
+      - method: POST
+        path: /intelligence/relay
+        description: "Relay intelligence to all nodes"
+    depends_on: []  # standalone Cloudflare Worker
+
+  # --- Scripts ---
+
+  node-status:
+    name: "Node Status Dashboard"
+    path: "scripts/node-status.sh"
+    status: prototype
+    description: >
+      Comprehensive 9-section terminal dashboard. Node identity, daemon status,
+      federation network, scheduler stats, recent activity, system resources,
+      repository status, edge infrastructure, content pipeline. Supports --json.
+      496 lines.
+    depends_on:
+      - gatekeeper-daemon
+      - firewire-daemon
+      - scheduler
+
+  # --- Future Components ---
 
   mcp-server:
     name: "MCP Server"
@@ -402,7 +635,7 @@ components:
       to communicate with agents from other projects and organizations.
       Enables collaborative investigations across organizational boundaries.
     depends_on:
-      - federation-protocol
+      - firewire-daemon
       - mcp-server
 
 # ---------------------------------------------------------------------------
@@ -412,21 +645,39 @@ components:
 # Format: component -> [dependencies]
 
 dependency_graph:
+  # Core infrastructure
   gatekeeper-daemon: [ollama]
   scheduler: [gatekeeper-daemon, plugin-system]
   worker-orchestrator: [claude-code, github]
   cli-client: [gatekeeper-daemon]
   plugin-system: [gatekeeper-daemon]
+  # Federation
+  firewire-daemon: []
+  fire-message-cli: [firewire-daemon]
+  plugin-firewire-relay: [firewire-daemon, plugin-system]
+  fire-relay: []
+  # Civic data plugins
   plugin-civic-legiscan: [gatekeeper-daemon, plugin-system]
   plugin-civic-fec: [gatekeeper-daemon, plugin-system]
   plugin-civic-spending: [gatekeeper-daemon, plugin-system]
   plugin-civic-crossref: [plugin-civic-fec, plugin-civic-spending, plugin-civic-legiscan, gatekeeper-daemon, plugin-system]
+  # Forge plugins
   plugin-forge-vision: [gatekeeper-daemon, plugin-system]
   plugin-forge-voice: [gatekeeper-daemon, plugin-system]
+  plugin-forge-satire: [gatekeeper-daemon, plugin-system]
+  # Distribution plugins
+  plugin-social-bluesky: [plugin-system]
+  plugin-social-mastodon: [plugin-system]
+  # Legal plugins
+  plugin-legal-automation: [gatekeeper-daemon, plugin-system]
+  # Pipeline
   plugin-pipeline-data-to-fire: [plugin-civic-crossref, plugin-forge-vision, plugin-forge-voice, plugin-system]
+  # Monitoring
+  node-status: [gatekeeper-daemon, firewire-daemon, scheduler]
+  # Static
   docs-site: []
   specs: []
   philosophy: []
-  federation-protocol: [gatekeeper-daemon, plugin-system]
+  # Future
   mcp-server: [gatekeeper-daemon, plugin-system]
-  a2a-agent: [federation-protocol, mcp-server]
+  a2a-agent: [firewire-daemon, mcp-server]
