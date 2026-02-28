@@ -123,23 +123,51 @@ roles:
   scheduler-agent:
     name: "Scheduler Agent"
     description: >
-      The scheduler daemon executing automated tasks. Runs on a schedule
-      or in response to events. Limited to executing defined tasks.
-    model: "n/a (daemon, not LLM-based)"
+      The scheduler daemon (scheduler.py) executing 25 autonomous tasks
+      across 6 categories. Runs on cron schedules and in response to
+      file/HTTP events. Includes Claude Code executor type for AI-driven
+      tasks with concurrency limiting (max 2 concurrent).
+    model: "n/a (daemon) + claude-opus (for 'claude' type tasks)"
     tools:
       - plugin_execution
       - gatekeeper_api
-      - shell_commands  # as defined in tasks.json
+      - shell_commands
+      - claude_code_executor
     allowed_actions:
       - "Execute tasks defined in scheduler/tasks.json"
       - "Call plugins with predefined inputs"
       - "Submit prompts to gatekeeper"
-      - "Log results"
+      - "Execute Claude Code with --dangerously-skip-permissions for claude-type tasks"
+      - "Log results to task-results.jsonl"
+      - "Serve status API on port 7802"
+      - "Reload task configuration on SIGHUP"
     forbidden_actions:
       - "Modify its own task definitions"
-      - "Create new tasks"
-      - "Access GitHub API"
-      - "Modify any project files"
+      - "Create new tasks at runtime"
+      - "Modify any project files directly"
+
+  federation-agent:
+    name: "Federation Agent"
+    description: >
+      The FireWire daemon (firewire.py) handling peer discovery, gossip
+      propagation, intelligence sharing, and task coordination across the
+      decentralized network. Ed25519 message signing.
+    model: "n/a (daemon, not LLM-based)"
+    tools:
+      - firewire_protocol
+      - shell_commands  # for openssl operations
+    allowed_actions:
+      - "Accept and relay messages from peers"
+      - "Manage peer list (add, remove stale peers)"
+      - "Store intelligence items (up to 1000)"
+      - "Coordinate task claims across nodes"
+      - "Log all operations to append-only log"
+      - "Gossip with peers on 60-second interval"
+    forbidden_actions:
+      - "Modify project files"
+      - "Execute arbitrary code"
+      - "Access gatekeeper directly"
+      - "Modify its own identity key"
 
 # ---------------------------------------------------------------------------
 # Available Tools
@@ -162,6 +190,11 @@ tools:
       - "git status / git diff / git log"
       - "curl (for API testing)"
       - "scripts/gatekeeper-ctl.sh"
+      - "scripts/scheduler-ctl.sh"
+      - "scripts/firewire-ctl.sh"
+      - "scripts/node-status.sh"
+      - "bin/fire-ask"
+      - "bin/fire-message"
 
   file_read_write:
     description: "Read and write files in the project directory"
@@ -213,6 +246,36 @@ tools:
       - "Queue has limited capacity (default 5) -- handle rejection gracefully"
       - "Always include 'caller' field identifying the requesting agent/plugin"
       - "Respect timeout (default 120s)"
+
+  firewire_protocol:
+    description: "FireWire federation protocol communication"
+    invocation: "HTTP to http://127.0.0.1:7801/ or bin/fire-message"
+    constraints:
+      - "FireWire daemon must be running (check with GET /health)"
+      - "Messages must be Ed25519 signed with node identity"
+      - "All operations logged to append-only log"
+      - "Intelligence items limited to 1000 per node"
+      - "Peers with >300s staleness are marked stale"
+
+  claude_code_executor:
+    description: "Execute Claude Code CLI for autonomous AI-driven tasks"
+    invocation: "claude --dangerously-skip-permissions -p <prompt>"
+    constraints:
+      - "Maximum 2 concurrent Claude tasks (semaphore limited)"
+      - "Only used by scheduler for 'claude' type tasks"
+      - "Prompts are defined in tasks.json, not generated at runtime"
+      - "Output captured and logged to task results"
+      - "Subject to all safety boundaries in this file"
+
+  scheduler_api:
+    description: "Scheduler status and control API"
+    invocation: "HTTP to http://127.0.0.1:7802/"
+    endpoints:
+      - "GET /health - daemon health check"
+      - "GET /status - comprehensive status with task stats"
+      - "GET /tasks - list configured tasks with next run times"
+      - "GET /results - recent task execution results"
+      - "POST /reload - reload tasks.json configuration"
 
   web_search:
     description: "Search the web for information"
