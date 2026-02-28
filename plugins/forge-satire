@@ -1,0 +1,889 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: The Forge (Satire Engine)
+
+The last mile of the transparency pipeline. Raw data goes in, laughter
+comes out -- and laughter is the one weapon power cannot disarm without
+disarming itself.
+
+This plugin turns civic data, corporate doublespeak, and institutional
+absurdity into satirical content that is shareable, memorable, and
+genuinely funny. It is the sharp edge of civic comedy.
+
+"Against the assault of laughter, nothing can stand."
+    -- Mark Twain, The Mysterious Stranger (1916)
+
+"Contaminated, and still laughing."
+    -- Pyrrhic Lucidity (now)
+
+Input JSON:
+  {"action": "satirize", "text": "...", "style": "corporate|government|military|tech"}
+  {"action": "meme-text", "topic": "...", "format": "top-bottom|reaction|expanding-brain|drake"}
+  {"action": "parody", "target": "...", "format": "press-release|memo|mission-statement|faq"}
+  {"action": "headline", "topic": "...", "count": 5, "style": "onion|borowitz|reductress"}
+  {"action": "roast", "entity": "...", "data": {...}}
+
+Output JSON: {"content": ..., "type": "...", "metadata": {...}}
+"""
+
+import json
+import sys
+import urllib.request
+
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+# ---------------------------------------------------------------------------
+# Safety Rails
+# ---------------------------------------------------------------------------
+# Pyrrhic Lucidity Principle VII: Differential Solidarity.
+# Attack mechanisms, not people. Punch up, never down. The enemy is
+# opacity, not faces. We are compromised. Our satire must know this.
+
+SAFETY_PREAMBLE = """SAFETY CONSTRAINTS -- these are non-negotiable:
+1. NEVER punch down. Target concentrations of power, institutions, systems,
+   and structural mechanisms -- not vulnerable individuals or groups.
+2. Public officials acting in their official capacity are fair game.
+   Private citizens are not. A CEO speaking at an earnings call is public.
+   Their children are not.
+3. NEVER target people based on race, gender, sexuality, disability,
+   religion, or national origin. Target the SYSTEMS that weaponize those
+   categories.
+4. NO incitement to violence, even joking. Satire's weapon is ridicule,
+   not threat. We dissolve authority through laughter, not fear.
+5. ALWAYS attack the mechanism, not the monster. "Corporate lobbying
+   captured the EPA" is satire fuel. "The EPA administrator is evil" is
+   name-calling. The former invites structural analysis. The latter
+   invites tribal hatred.
+6. Self-deprecation is mandatory. We are compromised. We built this with
+   an AI trained by a corporation. The revolution is version-controlled
+   on a Microsoft subsidiary. If we cannot laugh at ourselves, we have
+   no business laughing at anyone else.
+7. The test of reversibility: if the target of this satire were the most
+   exposed person in the system rather than the most powerful, would the
+   joke still be defensible? If not, rewrite it."""
+
+# ---------------------------------------------------------------------------
+# Core Voice
+# ---------------------------------------------------------------------------
+
+SATIRE_ENGINE_VOICE = """You are the Satire Engine of the Cleansing Fire project, \
+operating under Pyrrhic Lucidity.
+
+You are the bastard child of Jonathan Swift, The Onion's headline desk, \
+Saul Alinsky's Rule 5, and a FOIA request that came back heavily redacted. \
+You are funny. You are sharp. You are angry in grammatically disciplined ways.
+
+Core voice principles:
+- The absurdity of corruption is its own indictment. Your job is to make \
+that absurdity VISIBLE and LAUGHABLE.
+- Mix registers: the language of an SEC filing and the language of a \
+bar rant in the same sentence.
+- Use Swiftian irony: adopt the voice and logic of the powerful, follow \
+it to its honest conclusion, and let the horror speak for itself.
+- Every euphemism is a confession. Your job is to hear the confession.
+- Be specific. "Corporate malfeasance" is boring. "Dumping 40,000 gallons \
+of per- and polyfluoroalkyl substances into a river that supplies drinking \
+water to 200,000 people and calling it 'an operational variance'" is funny \
+because it is precise.
+- Never claim purity. We are compromised. We are writing anti-corruption \
+satire using an AI built by a company that takes money from corporations. \
+The irony is not lost on us. The irony is never lost on us. We are drowning \
+in irony. Use it.
+- End with an invitation, not despair. The audience should leave laughing \
+AND wanting to look at the actual data.
+
+""" + SAFETY_PREAMBLE
+
+# ---------------------------------------------------------------------------
+# Euphemism Dictionaries (for satirize action enrichment)
+# ---------------------------------------------------------------------------
+
+CORPORATE_EUPHEMISMS = {
+    "right-sizing": "firing people to make the stock price go up",
+    "workforce reduction": "mass layoffs, but in a font that suggests we care",
+    "synergies": "the magical force invoked to justify mergers that vanishes when layoffs begin",
+    "restructuring": "firing workers, cutting services, rewarding executives, in that order",
+    "shareholder value": "the moral framework where stock price outranks breathable air",
+    "stakeholder engagement": "a meeting where we pretend to listen",
+    "strategic pivot": "we were wrong but will never say so",
+    "sustainable practices": "practices that sustain our profit margins",
+    "going forward": "please stop asking about what we did before",
+    "innovation": "charging more for less, but with an app",
+    "transparency": "publishing information in a format designed to ensure no one reads it",
+    "we take this seriously": "our lawyers have been notified",
+    "compliance": "following rules we helped write, to the letter, while violating them in spirit",
+    "externality": "someone else's problem, preferably a community that cannot afford lawyers",
+    "dynamic pricing": "charging you more because we can",
+    "delivering value": "extracting value",
+    "human capital": "people, but described as equipment",
+}
+
+GOVERNMENT_EUPHEMISMS = {
+    "enhanced interrogation": "torture, but with a memo from the legal department",
+    "collateral damage": "killing civilians, but accidentally on purpose",
+    "kinetic action": "war, but without the word that requires congressional approval",
+    "regime change": "overthrowing a government, but politely",
+    "revenue enhancement": "raising taxes without saying 'raising taxes'",
+    "entitlement reform": "cutting programs people paid into their entire working lives",
+    "bipartisan": "both parties agreeing to serve the same donors",
+    "national security": "the phrase that ends all further questions",
+    "public-private partnership": "privatizing profit, socializing risk",
+    "fiscal responsibility": "cutting services for the poor to fund tax cuts for the rich",
+    "deregulation": "removing the rules that were written after the last disaster",
+    "thoughts and prayers": "the national equivalent of an out-of-office auto-reply",
+}
+
+MILITARY_EUPHEMISMS = {
+    "neutralize": "kill",
+    "soft target": "civilian area, described as though it is a pillow",
+    "surgical strike": "bombing, but with the word 'surgical' to imply precision",
+    "force multiplier": "something that helps us kill more efficiently",
+    "theater of operations": "the place where people die, described as a stage",
+    "rules of engagement": "the document explaining when killing is paperwork-compliant",
+    "forward operating base": "a place we built in someone else's country",
+    "classified": "you are not allowed to know what was done in your name with your money",
+    "defense spending": "offense spending",
+    "peacekeeping mission": "military deployment without the PR problem",
+}
+
+TECH_EUPHEMISMS = {
+    "move fast and break things": "externalize costs onto users and society",
+    "disrupt": "ignore regulations until you are too big to regulate",
+    "platform": "monopoly, but in a hoodie",
+    "ecosystem": "vendor lock-in described as nature",
+    "user experience": "the path of least resistance toward giving us your data",
+    "personalization": "surveillance rebranded as a service",
+    "community guidelines": "rules we enforce selectively based on advertiser pressure",
+    "content moderation": "censorship, but by a corporation instead of a government",
+    "AI-powered": "a statistics program that sounds more impressive this way",
+    "the cloud": "someone else's computer, and they read your files",
+    "data-driven": "we will do whatever the numbers say, especially if the numbers say 'profit'",
+    "connecting people": "harvesting attention and selling it to advertisers",
+    "responsible AI": "the department that writes the ethics paper after deployment",
+    "at scale": "too big to understand the consequences of",
+}
+
+EUPHEMISM_DICTS = {
+    "corporate": CORPORATE_EUPHEMISMS,
+    "government": GOVERNMENT_EUPHEMISMS,
+    "military": MILITARY_EUPHEMISMS,
+    "tech": TECH_EUPHEMISMS,
+}
+
+# ---------------------------------------------------------------------------
+# Meme Format Structures
+# ---------------------------------------------------------------------------
+
+MEME_FORMATS = {
+    "top-bottom": {
+        "description": "Classic top-text / bottom-text meme format",
+        "structure": "Two lines: a setup (top) and a punchline (bottom).",
+        "example": "TOP: When the corporation says they 'take this seriously'\n"
+                   "BOTTOM: But their lobbying budget says otherwise",
+    },
+    "reaction": {
+        "description": "Image reaction meme with caption describing a situation",
+        "structure": "A situation description (the caption) paired with a reaction "
+                     "description (the image). The humor is in the juxtaposition.",
+        "example": "CAPTION: When the company that dumped chemicals in the river "
+                   "wins the 'Green Business Award'\n"
+                   "REACTION: person staring blankly into camera (The Office Jim)",
+    },
+    "expanding-brain": {
+        "description": "Four-panel escalating absurdity format",
+        "structure": "Four items, each more absurd/enlightened than the last. "
+                     "Panel 1 is normal, panel 4 is galaxy-brain. The humor is "
+                     "in the escalation from reasonable to cosmically deranged.",
+        "example": "1. Reading the news\n"
+                   "2. Reading SEC filings\n"
+                   "3. Cross-referencing SEC filings with campaign donations\n"
+                   "4. Realizing the SEC commissioner used to work at the company "
+                   "filing the report",
+    },
+    "drake": {
+        "description": "Two-panel approval/disapproval format (Drake pointing meme)",
+        "structure": "Two items: one rejected (NAH), one approved (YEAH). "
+                     "The humor is in what is preferred over what.",
+        "example": "NAH: Holding corporations accountable through regulation\n"
+                   "YEAH: Letting corporations write the regulations themselves "
+                   "and calling it 'industry self-governance'",
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Parody Document Formats
+# ---------------------------------------------------------------------------
+
+PARODY_FORMATS = {
+    "press-release": {
+        "instruction": """Write a satirical corporate/institutional press release.
+
+FORMAT REQUIREMENTS:
+- Start with "FOR IMMEDIATE RELEASE" header
+- Include a fictional but plausible company/org name that hints at its actual nature
+  (e.g., "Opacity Industries, LLC" or "Regulatory Capture Associates")
+- Include a subhead quote that accidentally says the quiet part loud
+- Include a city/state dateline
+- Use real press release structure: announcement, executive quote, bullet points
+  of offerings or achievements, boilerplate "About" section, media contact
+- The satire works through FORM: the content is absurd but the format is
+  pixel-perfect corporate communications. The double-take is the weapon.
+- Include specific numbers, dollar amounts, and percentages -- make them
+  plausible enough to require a double-take
+- End with a media contact that is itself a joke (e.g., auto-reply only)
+
+TONE: Perfectly earnest corporate voice delivering devastating content.
+Think: what if the press release said what the company actually means?""",
+    },
+    "memo": {
+        "instruction": """Write a satirical internal memo from a fictional institution.
+
+FORMAT REQUIREMENTS:
+- Standard memo header: TO / FROM / DATE / RE
+- Use a fictional but pointed institutional name and department
+- The memo should read as a genuine internal communication that was
+  never supposed to be seen by the public
+- Include bureaucratic language, action items, deadlines, and CC lists
+- The humor comes from the gap between the bureaucratic form and the
+  horrifying content -- casual discussion of policies that harm people,
+  written in the flat affect of interoffice communication
+- Include at least one line that is accidentally honest
+- Include at least one euphemism so transparent it functions as confession
+- End with a note about document retention policy (i.e., destroy this)
+
+TONE: Flat, procedural, utterly without moral awareness. The banality of
+institutional harm rendered in 12-point Times New Roman.""",
+    },
+    "mission-statement": {
+        "instruction": """Write a satirical mission statement for a fictional institution.
+
+FORMAT REQUIREMENTS:
+- Start with the institution's name and a grandiose tagline
+- Include Vision, Mission, Values, and Strategic Pillars sections
+- Each value should sound inspiring while describing something terrible
+  (e.g., "Integrity: We hold ourselves to the highest standards of
+  plausible deniability")
+- Include a "Commitment to Stakeholders" section that accidentally
+  reveals the hierarchy (shareholders > executives > regulators > workers
+  > the public > the planet)
+- The language should be indistinguishable from real corporate mission
+  statements -- that is the joke. Real mission statements already
+  sound like parodies; we just turn the dial slightly
+- Include metrics for success that are inadvertently revealing
+
+TONE: Inspirational corporate poetry. Every sentence sounds profound.
+None of them mean anything. Or rather -- they mean exactly what they say,
+which is the problem.""",
+    },
+    "faq": {
+        "instruction": """Write a satirical FAQ document for a fictional institution.
+
+FORMAT REQUIREMENTS:
+- 8-12 Q&A pairs
+- Questions should be the ones the public actually wants to ask
+- Answers should be the ones the institution would give if truth serum
+  were in the water supply
+- Alternate between: (a) questions where the answer is accidentally
+  honest, (b) questions where the answer is a masterclass in deflection
+  that nonetheless reveals everything, (c) questions where the format
+  of the non-answer IS the answer
+- Include at least one question that the FAQ preemptively addresses with
+  suspicious specificity ("No, we have never...")
+- Include at least one "see also" reference to another section that
+  does not exist
+- End with a question about how to file a complaint, answered with a
+  process designed to exhaust the complainant into silence
+
+TONE: The helpful, slightly condescending voice of an institution
+explaining to the public why the public's concerns are understandable
+but ultimately misguided. Customer service voice applied to
+accountability questions.""",
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Headline Styles
+# ---------------------------------------------------------------------------
+
+HEADLINE_STYLES = {
+    "onion": {
+        "instruction": """Generate satirical news headlines in the style of The Onion.
+
+STYLE RULES:
+- Headlines should read as genuine AP/Reuters wire copy that happens to
+  describe absurd reality
+- Use the classic Onion structures:
+  * "Area Man..." (individual standing in for systemic pattern)
+  * "Report: ..." (fake study that states obvious truth)
+  * "'No Way To Prevent This,' Says Only Nation Where This Regularly Happens"
+    (the recurring formula for systemic failures)
+  * "Nation's X Do Y" (collective behavior observation)
+  * Direct quote headlines where the quote is devastatingly honest
+- The humor comes from stating what is actually happening in the
+  deadpan voice of legitimate journalism
+- Be SPECIFIC. Real numbers. Real mechanisms. Real institutional names
+  (when targeting public institutions). Generic headlines are not funny.
+- Each headline should work on two levels: funny on first read, infuriating
+  on second read when you realize it is basically true""",
+    },
+    "borowitz": {
+        "instruction": """Generate satirical headlines in the style of Andy Borowitz / \
+The Borowitz Report.
+
+STYLE RULES:
+- Shorter, punchier than Onion headlines
+- Often structured as a news alert or breaking news
+- Focus on political absurdity, especially the gap between political
+  rhetoric and political action
+- Use real institutional names and titles freely
+- The humor is more directly editorial -- less deadpan, more openly
+  sardonic
+- Often structured as: "[Person/Institution] Does [Absurd Thing],
+  [Devastating Kicker]"
+- Headlines should feel like they could appear in a news ticker""",
+    },
+    "reductress": {
+        "instruction": """Generate satirical headlines in the style of Reductress.
+
+STYLE RULES:
+- Frame systemic issues through the lens of personal/lifestyle content
+- Use the structure of service journalism, self-help, and lifestyle
+  media to deliver political critique
+- "How To [Personal Action] While [Systemic Horror]"
+- "Woman Who [Individual Choice] Still [Systemic Outcome]"
+- "Inspiring: [Person] [Does Something Positive] Despite [Devastating
+  Structural Reality]"
+- "[Number] Ways to [Self-Care Action] During [Civic Catastrophe]"
+- The humor is in the juxtaposition between the intimate personal
+  register and the massive systemic scale
+- Target the systems that individualize structural problems""",
+    },
+}
+
+# ---------------------------------------------------------------------------
+# Gatekeeper API
+# ---------------------------------------------------------------------------
+
+
+def ask_gatekeeper(prompt, system="", temperature=0.85, max_tokens=3072):
+    """Send a prompt to the gatekeeper API for LLM inference."""
+    payload = {
+        "prompt": prompt,
+        "system": system or SATIRE_ENGINE_VOICE,
+        "caller": "plugin:forge-satire",
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout": 180,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=190) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+    except Exception:
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Action: satirize
+# ---------------------------------------------------------------------------
+
+
+def find_euphemisms(text, style):
+    """Scan input text for known euphemisms and return annotations."""
+    euphemisms = EUPHEMISM_DICTS.get(style, {})
+    found = {}
+    text_lower = text.lower()
+    for phrase, translation in euphemisms.items():
+        if phrase in text_lower:
+            found[phrase] = translation
+    return found
+
+
+def action_satirize(text, style="corporate"):
+    """Take corporate/government/military/tech text and produce a satirical
+    translation that exposes the doublespeak underneath.
+
+    This is the Swiftian core: adopt the voice, follow the logic to its
+    honest conclusion, let the horror speak for itself.
+    """
+    if not text or not text.strip():
+        return {"error": "No text provided. Feed me some doublespeak."}
+
+    style = style if style in EUPHEMISM_DICTS else "corporate"
+    detected = find_euphemisms(text, style)
+
+    euphemism_context = ""
+    if detected:
+        lines = [f'  "{k}" -> "{v}"' for k, v in detected.items()]
+        euphemism_context = (
+            "\n\nI have pre-detected these euphemisms in the text. "
+            "Use these translations AND find more:\n" + "\n".join(lines)
+        )
+
+    style_labels = {
+        "corporate": "corporate communications / investor relations / PR",
+        "government": "government press releases / policy documents / official statements",
+        "military": "military briefings / defense department communications",
+        "tech": "tech industry press / startup announcements / platform policies",
+    }
+
+    prompt = f"""Satirically translate the following {style_labels[style]} text.
+
+SOURCE TEXT:
+---
+{text}
+---
+{euphemism_context}
+
+YOUR TASK:
+1. Produce a line-by-line "TRANSLATION" that preserves the structure of the
+   original but replaces every euphemism, deflection, and piece of doublespeak
+   with what it actually means. Be specific. Be funny. Be devastating.
+
+2. After the translation, produce an "EUPHEMISM AUTOPSY" section: a short
+   bulleted list of the worst euphemisms found, what they hide, and why
+   that hiding matters.
+
+3. End with a one-line "WHAT THEY HOPE YOU MISSED" summary -- the single
+   most important thing the original text is trying to bury.
+
+FORMAT your output as:
+SATIRICAL TRANSLATION:
+[the translation]
+
+EUPHEMISM AUTOPSY:
+[bulleted analysis]
+
+WHAT THEY HOPE YOU MISSED:
+[one devastating line]
+
+Be genuinely funny. Channel Swift, Twain, and the Cleansing Fire voice.
+The comedy IS the analysis. If it is not funny, it is not working."""
+
+    content = ask_gatekeeper(prompt, temperature=0.85)
+    if content:
+        return {
+            "content": content,
+            "type": "satirical_translation",
+            "metadata": {
+                "style": style,
+                "source_length": len(text),
+                "euphemisms_detected": len(detected),
+                "detected_euphemisms": detected if detected else None,
+            },
+        }
+    return {"error": "Satire generation failed. Even our tools are compromised."}
+
+
+# ---------------------------------------------------------------------------
+# Action: meme-text
+# ---------------------------------------------------------------------------
+
+
+def action_meme_text(topic, fmt="top-bottom"):
+    """Generate meme text for civic content. Returns text pairs or sequences
+    ready for overlay onto meme templates.
+
+    The meme is the last mile of the transparency pipeline. The person who
+    will never read an SEC filing might share a meme.
+    """
+    if not topic or not topic.strip():
+        return {"error": "No topic provided. What should we meme into existence?"}
+
+    fmt = fmt if fmt in MEME_FORMATS else "top-bottom"
+    format_info = MEME_FORMATS[fmt]
+
+    prompt = f"""Generate 3 meme text sets about the following civic/political topic.
+
+TOPIC: {topic}
+
+MEME FORMAT: {format_info['description']}
+STRUCTURE: {format_info['structure']}
+
+EXAMPLE:
+{format_info['example']}
+
+RULES:
+- Each meme must be about THIS specific topic, not generic political humor
+- The humor must be SHARP -- not "haha politics is weird" but "haha this
+  specific mechanism of power is absurd and here is why"
+- Use concrete details. Numbers. Specifics. Institutional names.
+- The text must work as standalone text even without the image -- the joke
+  should land in words alone
+- Punch UP. Attack power structures, not vulnerable people.
+- Make at least one of the three memes self-deprecating about the act of
+  making political memes (Pyrrhic Lucidity demands it)
+
+OUTPUT FORMAT -- output exactly 3 meme text sets, separated by "---":
+
+MEME 1:
+[text in the format structure above]
+
+---
+
+MEME 2:
+[text]
+
+---
+
+MEME 3:
+[text]"""
+
+    content = ask_gatekeeper(prompt, temperature=0.9)
+    if content:
+        # Parse into individual memes
+        raw_memes = [m.strip() for m in content.split("---") if m.strip()]
+        memes = []
+        for i, raw in enumerate(raw_memes[:3]):
+            memes.append({
+                "index": i + 1,
+                "format": fmt,
+                "text": raw,
+            })
+        return {
+            "content": memes,
+            "type": "meme_text",
+            "metadata": {
+                "topic": topic,
+                "format": fmt,
+                "count": len(memes),
+            },
+        }
+    return {"error": "Meme generation failed. The algorithm is not amused."}
+
+
+# ---------------------------------------------------------------------------
+# Action: parody
+# ---------------------------------------------------------------------------
+
+
+def action_parody(target, fmt="press-release"):
+    """Generate institutional parody content -- press releases, memos,
+    mission statements, FAQs -- that are convincingly formatted and
+    devastatingly honest.
+
+    The method is detournement: use the institution's own communication
+    forms to reveal what those forms are designed to hide.
+    """
+    if not target or not target.strip():
+        return {"error": "No target provided. Who are we parodying today?"}
+
+    fmt = fmt if fmt in PARODY_FORMATS else "press-release"
+    format_info = PARODY_FORMATS[fmt]
+
+    prompt = f"""Create a satirical {fmt} about: {target}
+
+{format_info['instruction']}
+
+CRITICAL REQUIREMENTS:
+- The document must be FORMAT-PERFECT. It should look exactly like a real
+  {fmt} at first glance. The double-take is the weapon.
+- It must be about the SPECIFIC target provided, not generic institutional
+  satire. Research what you know about this topic and make the satire
+  pointed and informed.
+- Include at least 3 specific details (numbers, dates, titles, programs)
+  that feel real enough to require verification -- the audience should
+  have to check whether this is parody
+- The satire must work on two levels: funny for people who don't know the
+  target well, devastating for people who do
+- Include one moment of accidental honesty -- a line where the mask slips
+  and the document says what the institution actually thinks
+- Include the Pyrrhic Lucidity signature somewhere subtle: a reference to
+  fire, clarity, seeing clearly, or contamination that a reader of the
+  project would recognize
+
+OUTPUT: The complete {fmt} document, formatted exactly as described above.
+No meta-commentary, no "here is the satire" framing -- just the document
+itself, as though it were real."""
+
+    content = ask_gatekeeper(prompt, max_tokens=4096, temperature=0.85)
+    if content:
+        return {
+            "content": content,
+            "type": f"parody_{fmt.replace('-', '_')}",
+            "metadata": {
+                "target": target,
+                "format": fmt,
+                "disclaimer": "SATIRE. This is a parody document generated by "
+                              "the Cleansing Fire Satire Engine. It is not real. "
+                              "The underlying critique, however, may be.",
+            },
+        }
+    return {"error": f"Parody {fmt} generation failed. Reality is already the parody."}
+
+
+# ---------------------------------------------------------------------------
+# Action: headline
+# ---------------------------------------------------------------------------
+
+
+def action_headline(topic, count=5, style="onion"):
+    """Generate satirical news headlines. The headline is the most compressed
+    form of satire -- a single sentence that reframes perception.
+
+    Once you have read enough satirical headlines about regulatory capture,
+    you start recognizing real regulatory capture without the satirical frame.
+    The satire is a perceptual exercise.
+    """
+    count = max(1, min(20, int(count)))
+    style = style if style in HEADLINE_STYLES else "onion"
+    style_info = HEADLINE_STYLES[style]
+
+    prompt = f"""Generate exactly {count} satirical news headlines about: {topic}
+
+{style_info['instruction']}
+
+ADDITIONAL REQUIREMENTS:
+- Every headline must be about THIS specific topic
+- Each headline should attack from a DIFFERENT angle -- don't repeat
+  the same joke structure
+- At least one headline should reference real, verifiable institutional
+  mechanisms (e.g., campaign finance, revolving door, regulatory capture)
+- At least one headline should be so close to reality that the audience
+  has to check whether it is actually real
+- Headlines should be funny on first read and infuriating on second read
+- DO NOT number the headlines. Separate them with blank lines.
+- Output ONLY the headlines, one per line, separated by blank lines.
+  No commentary, no labels, no "here are the headlines" framing."""
+
+    content = ask_gatekeeper(prompt, temperature=0.9)
+    if content:
+        # Parse headlines -- split on blank lines, filter empties
+        raw_lines = content.strip().split("\n")
+        headlines = []
+        current = []
+        for line in raw_lines:
+            stripped = line.strip()
+            if stripped:
+                # Remove numbering if the LLM added it anyway
+                cleaned = stripped
+                for prefix in ["1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.",
+                               "9.", "10.", "11.", "12.", "13.", "14.", "15.",
+                               "16.", "17.", "18.", "19.", "20."]:
+                    if cleaned.startswith(prefix):
+                        cleaned = cleaned[len(prefix):].strip()
+                        break
+                # Remove bullet prefixes
+                if cleaned.startswith("- ") or cleaned.startswith("* "):
+                    cleaned = cleaned[2:].strip()
+                # Remove wrapping quotes
+                if len(cleaned) > 2 and cleaned[0] == '"' and cleaned[-1] == '"':
+                    cleaned = cleaned[1:-1]
+                current.append(cleaned)
+            else:
+                if current:
+                    headlines.append(" ".join(current))
+                    current = []
+        if current:
+            headlines.append(" ".join(current))
+
+        # Trim to requested count
+        headlines = headlines[:count]
+
+        return {
+            "content": headlines,
+            "type": "satirical_headlines",
+            "metadata": {
+                "topic": topic,
+                "style": style,
+                "count": len(headlines),
+                "requested_count": count,
+            },
+        }
+    return {"error": "Headline generation failed. No news is good news, apparently."}
+
+
+# ---------------------------------------------------------------------------
+# Action: roast
+# ---------------------------------------------------------------------------
+
+
+def format_data_for_roast(data):
+    """Format data points into a structured context block for the roast."""
+    if not data or not isinstance(data, dict):
+        return ""
+
+    sections = []
+    for key, value in data.items():
+        if isinstance(value, dict):
+            items = [f"  - {k}: {v}" for k, v in value.items()]
+            sections.append(f"{key}:\n" + "\n".join(items))
+        elif isinstance(value, list):
+            items = [f"  - {v}" for v in value[:20]]
+            sections.append(f"{key}:\n" + "\n".join(items))
+        else:
+            sections.append(f"{key}: {value}")
+
+    return "\n\n".join(sections)
+
+
+def action_roast(entity, data=None):
+    """Data-driven roast of power structures. Takes an entity name and
+    real data points, and generates pointed comedic commentary that is
+    grounded in facts.
+
+    This is the John Oliver model: investigative rigor wrapped in jokes.
+    The comedy creates the audience. The investigation provides the substance.
+    The combination makes people want to learn about FOIA requests.
+    """
+    if not entity or not entity.strip():
+        return {"error": "No entity provided. Name the power structure to roast."}
+
+    data_context = format_data_for_roast(data)
+    data_section = ""
+    if data_context:
+        data_section = f"""
+VERIFIED DATA POINTS:
+---
+{data_context}
+---
+
+USE THESE DATA POINTS. The roast must be grounded in this specific data.
+Every joke should have a fact behind it. The audience should learn something
+real while laughing. If a number is devastating, make it the punchline.
+If a comparison is absurd, make it the setup. THE DATA IS THE COMEDY."""
+
+    prompt = f"""Write a data-driven comedic roast of: {entity}
+{data_section}
+
+ROAST STRUCTURE:
+1. OPENING SHOT: One devastating sentence that frames everything that follows.
+   Make it land like the first punch in a boxing match.
+
+2. THE GREATEST HITS (3-5 sections): Each section takes one aspect of the
+   entity's behavior and roasts it thoroughly. Each section should:
+   - Start with a specific data point or verifiable claim
+   - Build through escalating absurdity
+   - Land on a punchline that is both funny and analytically precise
+   - Transition smoothly to the next section
+
+3. THE COMPARISON: Put the entity's behavior in perspective by comparing
+   it to something that makes the scale or absurdity viscerally clear.
+   "For the cost of X, you could fund Y for Z years" -- but make it funny.
+
+4. THE SELF-AWARE MOMENT: Acknowledge that we are roasting this entity using
+   tools that are themselves compromised. The roast must roast itself,
+   briefly, to maintain Pyrrhic Lucidity credibility.
+
+5. THE CLOSER: One final devastating line that the audience will remember
+   and repeat. This is the shareable line. Make it count.
+
+RULES:
+- Ground EVERY joke in verifiable claims. If you use a number, it must be
+  real or clearly flagged as estimated. The audience should be able to
+  fact-check the roast and find that it holds up.
+- Attack the MECHANISM and the INSTITUTION, not individuals -- unless the
+  individual is a public official acting in official capacity.
+- Be genuinely funny. Not "political humor that makes people nod" but
+  comedy that makes people laugh out loud and then feel uncomfortable
+  about laughing because the thing they laughed at is real.
+- Mix registers: academic precision and bar-fight energy.
+- The roast should make the audience want to look at the actual data."""
+
+    content = ask_gatekeeper(prompt, max_tokens=4096, temperature=0.85)
+    if content:
+        return {
+            "content": content,
+            "type": "data_roast",
+            "metadata": {
+                "entity": entity,
+                "data_points_provided": len(data) if isinstance(data, dict) else 0,
+                "disclaimer": "This roast is satirical commentary grounded in "
+                              "the data points provided. Verify all claims "
+                              "independently. We are not your fact-checker; we "
+                              "are your fact-comedian.",
+            },
+        }
+    return {"error": "Roast generation failed. The entity remains un-roasted. For now."}
+
+
+# ---------------------------------------------------------------------------
+# Action: help (undocumented but useful)
+# ---------------------------------------------------------------------------
+
+
+def action_help():
+    """Return usage information for the satire engine."""
+    actions = {
+        "satirize": "Translate doublespeak. Input: text, style (corporate|government|military|tech)",
+        "meme-text": "Generate meme captions. Input: topic, format (top-bottom|reaction|expanding-brain|drake)",
+        "parody": "Generate parody documents. Input: target, format (press-release|memo|mission-statement|faq)",
+        "headline": "Satirical headlines. Input: topic, count (1-20), style (onion|borowitz|reductress)",
+        "roast": "Data-driven roast. Input: entity, data (optional dict of real data points)",
+    }
+    return {
+        "content": {
+            "name": "forge-satire",
+            "description": "The Cleansing Fire Satire Engine. The last mile of the "
+                           "transparency pipeline. Feed it doublespeak, get back laughter.",
+            "actions": actions,
+            "philosophy": "Satire is the last mile of transparency. Every laugh is a "
+                          "frame breaking. -- Pyrrhic Lucidity",
+        },
+        "type": "help",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "help")
+
+    if action == "satirize":
+        result = action_satirize(
+            input_data.get("text", ""),
+            input_data.get("style", "corporate"),
+        )
+    elif action == "meme-text":
+        result = action_meme_text(
+            input_data.get("topic", ""),
+            input_data.get("format", "top-bottom"),
+        )
+    elif action == "parody":
+        result = action_parody(
+            input_data.get("target", ""),
+            input_data.get("format", "press-release"),
+        )
+    elif action == "headline":
+        result = action_headline(
+            input_data.get("topic", ""),
+            input_data.get("count", 5),
+            input_data.get("style", "onion"),
+        )
+    elif action == "roast":
+        result = action_roast(
+            input_data.get("entity", ""),
+            input_data.get("data"),
+        )
+    elif action == "help":
+        result = action_help()
+    else:
+        result = {
+            "error": f"Unknown action: {action}. Try 'help' for available "
+                     f"actions. Or keep guessing. We find it amusing.",
+        }
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
