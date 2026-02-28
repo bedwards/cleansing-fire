@@ -10,6 +10,10 @@
 - [Technology Research](https://bedwards.github.io/cleansing-fire/technology-research.md): Technical landscape and tool analysis
 - [Global Architecture](https://bedwards.github.io/cleansing-fire/global-architecture.md): Master architecture across all four infrastructure layers
 
+## Philosophy & Resistance
+
+- [Justified Resistance](https://bedwards.github.io/cleansing-fire/justified-resistance.md): The Calculus of Necessary Transgression -- when is law-breaking justified? Original framework from Thoreau, MLK, Gandhi, de Beauvoir, Paine, Fanon, Swartz
+
 ## Investigation & Intelligence
 
 - [Corporate Power Map](https://bedwards.github.io/cleansing-fire/corporate-power-map.md): Where power actually lives -- SEC, ownership chains, dark money networks
