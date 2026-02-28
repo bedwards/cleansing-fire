@@ -199,6 +199,7 @@ Separate from GitHub Pages — these handle compute, API, and AI inference at th
 
 ## Key Research Documents
 - `philosophy.md` - Pyrrhic Lucidity (956 lines)
+- `docs/justified-resistance.md` - The Calculus of Necessary Transgression (2305 lines)
 - `docs/economics.md` - The Ember Economy (1675 lines)
 - `docs/federation-protocol.md` - FireWire federation protocol (1829 lines)
 - `docs/intelligence-and-osint.md` - OSINT and exposure infrastructure (1803 lines)
@@ -217,11 +218,12 @@ Separate from GitHub Pages — these handle compute, API, and AI inference at th
 - `docs/cloudflare-implementation.md` - 5 workers, cost analysis, 5-phase rollout
 - `docs/dual-documentation.md` - Human + AI documentation architecture
 - `docs/fork-protection.md` - Integrity verification, web of trust
-- `docs/chaos-research.md` - Serendipity methodology, random research angles
+- `docs/movement-strategy.md` - Movement building strategy (1945 lines)
+- `docs/disinformation-defense.md` - Disinformation detection and counter-strategies (835 lines)
+- `docs/chaos-research.md` - Serendipity methodology, random research angles (1246 lines)
 - `docs/multimedia-tools.md` - Media generation tools research
 - `docs/getting-started.md` - Human onboarding guide
 - `docs/claude-code-tutorial.md` - CLI tutorial for beginners
-- `docs/justified-resistance.md` - Philosophy of justified resistance (in progress)
 
 ## Coherence Principle
 
