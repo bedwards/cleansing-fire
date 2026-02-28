@@ -1,0 +1,59 @@
+# =============================================================================
+# fire-relay: Federation Relay Worker
+# =============================================================================
+# The bootstrap relay for the FireWire federation network. New nodes contact
+# this worker to discover peers. Active nodes register themselves here.
+# This is NOT a central authority — it's a convenience bootstrap point.
+# Nodes can also discover peers via direct gossip without the relay.
+#
+# Deployment: Automatic via GitHub Actions on push to main.
+# Manual: npx wrangler deploy
+# Local dev: npx wrangler dev
+# =============================================================================
+
+name = "fire-relay"
+main = "src/index.js"
+compatibility_date = "2026-02-24"
+
+# -----------------------------------------------------------------------------
+# KV Namespace — Node Registry
+# -----------------------------------------------------------------------------
+# NODES: Stores registered node information with TTL-based expiration.
+# Key: node_id, Value: JSON with endpoint, capabilities, last_seen.
+# Nodes must re-register periodically (TTL = 1 hour) to stay in the registry.
+# This prevents stale entries from accumulating.
+# -----------------------------------------------------------------------------
+
+[[kv_namespaces]]
+binding = "NODES"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespace create NODES
+
+# -----------------------------------------------------------------------------
+# KV Namespace — Relay Configuration
+# -----------------------------------------------------------------------------
+# CONFIG: Relay configuration, rate limits, blocklists.
+# -----------------------------------------------------------------------------
+
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespace create RELAY_CONFIG
+
+# -----------------------------------------------------------------------------
+# D1 Database — Federation Log
+# -----------------------------------------------------------------------------
+# RELAY_DB: Append-only log of relay events for auditing.
+# Who registered, when, from where. Transparency requirement.
+# -----------------------------------------------------------------------------
+
+[[d1_databases]]
+binding = "RELAY_DB"
+database_name = "fire-relay"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"   # Create via: npx wrangler d1 create fire-relay
+
+# -----------------------------------------------------------------------------
+# Service Binding to fire-ai for optional AI verification
+# -----------------------------------------------------------------------------
+
+[[services]]
+binding = "FIRE_AI"
+service = "fire-ai"

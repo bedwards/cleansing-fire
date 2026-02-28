@@ -33,6 +33,7 @@ on:
           - fire-api
           - fire-ai
           - fire-markdown
+          - fire-relay
 
 # Only allow one deployment at a time to prevent race conditions
 concurrency:
@@ -50,6 +51,7 @@ jobs:
       fire-api: ${{ steps.changes.outputs.fire-api }}
       fire-ai: ${{ steps.changes.outputs.fire-ai }}
       fire-markdown: ${{ steps.changes.outputs.fire-markdown }}
+      fire-relay: ${{ steps.changes.outputs.fire-relay }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,6 +75,13 @@ jobs:
             echo "fire-api=false" >> $GITHUB_OUTPUT
             echo "fire-ai=false" >> $GITHUB_OUTPUT
             echo "fire-markdown=true" >> $GITHUB_OUTPUT
+            echo "fire-relay=false" >> $GITHUB_OUTPUT
+            exit 0
+          elif [ "${{ github.event.inputs.worker }}" = "fire-relay" ]; then
+            echo "fire-api=false" >> $GITHUB_OUTPUT
+            echo "fire-ai=false" >> $GITHUB_OUTPUT
+            echo "fire-markdown=false" >> $GITHUB_OUTPUT
+            echo "fire-relay=true" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -83,6 +92,7 @@ jobs:
               echo "fire-api=true" >> $GITHUB_OUTPUT
               echo "fire-ai=true" >> $GITHUB_OUTPUT
               echo "fire-markdown=true" >> $GITHUB_OUTPUT
+              echo "fire-relay=true" >> $GITHUB_OUTPUT
               exit 0
             fi
 
@@ -107,11 +117,18 @@ jobs:
               echo "fire-markdown=false" >> $GITHUB_OUTPUT
             fi
 
+            if echo "$CHANGED" | grep -q "edge/fire-relay/"; then
+              echo "fire-relay=true" >> $GITHUB_OUTPUT
+            else
+              echo "fire-relay=false" >> $GITHUB_OUTPUT
+            fi
+
             # If the workflow file itself changed, deploy everything
             if echo "$CHANGED" | grep -q "deploy-workers.yml"; then
               echo "fire-api=true" >> $GITHUB_OUTPUT
               echo "fire-ai=true" >> $GITHUB_OUTPUT
               echo "fire-markdown=true" >> $GITHUB_OUTPUT
+              echo "fire-relay=true" >> $GITHUB_OUTPUT
             fi
           fi
 
@@ -216,13 +233,43 @@ jobs:
           echo "fire-markdown deployment completed successfully."
 
   # ---------------------------------------------------------------------------
+  # Deploy fire-relay (independent, no dependencies on other workers)
+  # ---------------------------------------------------------------------------
+  deploy-fire-relay:
+    name: Deploy fire-relay
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.fire-relay == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Deploy fire-relay worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: edge/fire-relay
+          command: deploy
+
+      - name: Verify fire-relay deployment
+        run: |
+          echo "Waiting for worker to propagate..."
+          sleep 10
+          echo "fire-relay deployment completed successfully."
+
+  # ---------------------------------------------------------------------------
   # Post-deployment verification
   # ---------------------------------------------------------------------------
   verify:
     name: Verify deployments
     runs-on: ubuntu-latest
-    needs: [deploy-fire-ai, deploy-fire-api, deploy-fire-markdown]
-    if: always() && (needs.deploy-fire-ai.result == 'success' || needs.deploy-fire-api.result == 'success' || needs.deploy-fire-markdown.result == 'success')
+    needs: [deploy-fire-ai, deploy-fire-api, deploy-fire-markdown, deploy-fire-relay]
+    if: always() && (needs.deploy-fire-ai.result == 'success' || needs.deploy-fire-api.result == 'success' || needs.deploy-fire-markdown.result == 'success' || needs.deploy-fire-relay.result == 'success')
     steps:
       - name: Summary
         run: |
@@ -233,6 +280,7 @@ jobs:
           echo "| fire-ai | ${{ needs.deploy-fire-ai.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| fire-api | ${{ needs.deploy-fire-api.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| fire-markdown | ${{ needs.deploy-fire-markdown.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| fire-relay | ${{ needs.deploy-fire-relay.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Deployed from commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
