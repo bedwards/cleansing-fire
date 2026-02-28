@@ -34,8 +34,9 @@ Claude Code CLI is the human interface to this system. Humans learn to use Claud
 - **FireWire Daemon** (`daemon/firewire.py`, 1124 lines) - Federation protocol daemon on port 7801. Ed25519 message signing, gossip propagation, append-only log, intelligence sharing, task coordination, peer discovery. Pure stdlib Python.
 - **Scheduler** (`scheduler/scheduler.py`, 533 lines) - Autonomous operation loop: 25 tasks across 6 categories (sense/analyze/create/distribute/improve/system). Claude Code executor, HTTP poll events, status API on port 7802. The SENSE->ANALYZE->CREATE->DISTRIBUTE->IMPROVE->REPEAT cycle.
 - **CLI Client** (`bin/fire-ask`) - Command-line interface to gatekeeper
+- **Encrypted Messaging** (`bin/fire-message`, 823 lines) - Node-to-node encrypted messaging CLI. Ed25519 signing, AES-256-CBC encryption, send/inbox/read/peers/broadcast/threads. Relays via FireWire.
 - **Worker Orchestrator** (`workers/orchestrator.sh`) - Launches Claude Code workers in git worktrees
-- **Plugin System** (`plugins/`, 16 plugins) - Executable scripts that accept JSON stdin, produce JSON stdout
+- **Plugin System** (`plugins/`, 17 plugins) - Executable scripts that accept JSON stdin, produce JSON stdout
 
 ### Intelligence & Exposure
 - **OSINT Pipeline** - Automated open-source intelligence collection
@@ -139,7 +140,7 @@ cleansing-fire/
 │   ├── forge-*            # Content generation plugins
 │   └── pipeline-*         # Multi-plugin pipelines
 ├── scripts/               # Management and automation scripts (12 scripts)
-├── bin/                   # CLI tools (fire-ask)
+├── bin/                   # CLI tools (fire-ask, fire-message)
 ├── edge/                  # Cloudflare Workers
 │   ├── fire-api/          # REST API gateway
 │   └── fire-ai/           # Workers AI inference
@@ -178,6 +179,12 @@ scripts/firewire-ctl.sh announce <address>  # Connect to a peer
 # Test gatekeeper
 bin/fire-ask --status
 bin/fire-ask --sync "test prompt"
+
+# Encrypted messaging
+bin/fire-message send fire-abc123 "Hello from the network"
+bin/fire-message inbox
+bin/fire-message peers
+bin/fire-message broadcast "Network alert: new intelligence available"
 
 # Launch workers
 workers/orchestrator.sh implement "Task title" "Description"
@@ -231,7 +238,8 @@ Separate from GitHub Pages — these handle compute, API, and AI inference at th
 - `docs/fork-protection.md` - Integrity verification, web of trust
 - `docs/movement-strategy.md` - Movement building strategy (1945 lines)
 - `docs/disinformation-defense.md` - Disinformation detection and counter-strategies (835 lines)
-- `docs/zero-touch-bootstrap.md` - THE CENTRAL PIECE: one-command node deployment (2163 lines)
+- `docs/zero-touch-bootstrap.md` - THE CENTRAL PIECE: one-command node deployment (1992 lines)
+- `docs/adversarial-resilience.md` - War manual: threat modeling, takedown case studies, anti-fragile design, incident response (928 lines)
 - `docs/chaos-research.md` - Serendipity methodology, random research angles (1246 lines)
 - `docs/digital-rights-law.md` - CFAA, whistleblower protections, FOIA, legal survival guide (818 lines)
 - `docs/multimedia-tools.md` - Media generation tools research
