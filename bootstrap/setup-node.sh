@@ -220,6 +220,47 @@ else
     info "Skipping gatekeeper (no Ollama). Using Cloudflare Workers AI for inference."
 fi
 
+# FireWire federation daemon
+if curl -sf http://127.0.0.1:7801/health >/dev/null 2>&1; then
+    log "FireWire daemon: already running"
+else
+    log "Starting FireWire federation daemon..."
+    if [ -f "$FIRE_HOME/scripts/firewire-ctl.sh" ]; then
+        bash "$FIRE_HOME/scripts/firewire-ctl.sh" start 2>>"$LOG" && \
+            log "FireWire daemon: started on port 7801" || \
+            warn "FireWire daemon: failed to start"
+    else
+        nohup python3 "$FIRE_HOME/daemon/firewire.py" >> "$FIRE_CONFIG/firewire.log" 2>&1 &
+        sleep 2
+        if curl -sf http://127.0.0.1:7801/health >/dev/null 2>&1; then
+            log "FireWire daemon: started on port 7801"
+        else
+            warn "FireWire daemon: failed to start"
+        fi
+    fi
+fi
+
+# Install service files for auto-start
+if [ "$OS" = "Darwin" ]; then
+    # macOS: install launchd plists
+    LAUNCH_DIR="$HOME/Library/LaunchAgents"
+    mkdir -p "$LAUNCH_DIR"
+    for plist in com.cleansingfire.gatekeeper.plist com.cleansingfire.scheduler.plist; do
+        if [ -f "$FIRE_HOME/daemon/$plist" ]; then
+            cp "$FIRE_HOME/daemon/$plist" "$LAUNCH_DIR/" 2>/dev/null && \
+                info "Installed launchd plist: $plist" || true
+        fi
+    done
+elif command -v systemctl &>/dev/null; then
+    # Linux: install systemd service files
+    for svc in cleansing-fire-gatekeeper cleansing-fire-firewire cleansing-fire-scheduler; do
+        if [ -f "$FIRE_HOME/daemon/$svc.service" ]; then
+            info "Systemd service available: $svc.service"
+            info "  Install with: sudo cp daemon/$svc.service /etc/systemd/system/ && sudo systemctl enable $svc"
+        fi
+    done
+fi
+
 # ============================================================================
 # Phase 6: Start autonomous scheduler
 # ============================================================================
@@ -264,7 +305,7 @@ if command -v wrangler &>/dev/null; then
         log "Wrangler: authenticated"
 
         # Deploy workers
-        for worker in fire-api fire-ai fire-markdown; do
+        for worker in fire-api fire-ai fire-markdown fire-relay; do
             WORKER_DIR="$FIRE_HOME/edge/$worker"
             if [ -d "$WORKER_DIR" ]; then
                 log "Deploying $worker..."
@@ -308,8 +349,11 @@ log "Tasks:          $TASK_COUNT autonomous tasks enabled"
 log ""
 log "To interact:    cd $FIRE_HOME && claude"
 log "To investigate:  claude -p '/investigate [entity name]'"
+log "To message:     bin/fire-message send <node-id> <message>"
 log "Scheduler:      scripts/scheduler-ctl.sh status"
+log "Federation:     scripts/firewire-ctl.sh status"
 log "Node status:    scripts/node-status.sh"
+log "Test plugins:   scripts/test-plugins.sh"
 log ""
 log "The fire is lit. This node is operational."
 log "Ignis purgat. Luciditas liberat."
