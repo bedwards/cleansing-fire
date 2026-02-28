@@ -1,0 +1,772 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Social Bluesky (AT Protocol)
+
+Posts content to Bluesky via the AT Protocol XRPC API. Handles session
+management (create/refresh), posting, threading, profile lookup,
+timeline reading, and search.
+
+Designed for the Cleansing Fire distribution pipeline — getting
+investigated truths onto decentralized social infrastructure.
+
+Input JSON:
+  {"action": "post", "text": "...", "reply_to": "at://..."}
+  {"action": "thread", "posts": ["text1", "text2", ...]}
+  {"action": "profile", "handle": "someone.bsky.social"}
+  {"action": "timeline", "limit": 20}
+  {"action": "search", "query": "corporate lobbying", "limit": 25}
+
+Output JSON: varies by action
+
+Required env vars:
+  BLUESKY_HANDLE       - Bluesky handle (e.g. yourname.bsky.social)
+  BLUESKY_APP_PASSWORD - App password (generate at bsky.app/settings/app-passwords)
+
+Optional env vars:
+  BLUESKY_SERVICE       - PDS URL (default: https://bsky.social)
+
+Manifest:
+  name: social-bluesky
+  category: social
+  description: Posts to Bluesky via the AT Protocol for decentralized content distribution
+  actions:
+    - name: post
+      description: Post a text to Bluesky, optionally as a reply
+    - name: thread
+      description: Post a threaded series of posts
+    - name: profile
+      description: Get profile info for a handle
+    - name: timeline
+      description: Get recent posts from the authenticated user's timeline
+    - name: search
+      description: Search posts on Bluesky
+  requires_env: [BLUESKY_HANDLE, BLUESKY_APP_PASSWORD]
+  uses_gatekeeper: false
+  calls_plugins: []
+"""
+
+import datetime
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+BLUESKY_SERVICE = os.environ.get("BLUESKY_SERVICE", "https://bsky.social")
+BLUESKY_HANDLE = os.environ.get("BLUESKY_HANDLE", "")
+BLUESKY_APP_PASSWORD = os.environ.get("BLUESKY_APP_PASSWORD", "")
+
+BLUESKY_CHAR_LIMIT = 300
+
+# Rate limiting: track last post time via a temp file
+RATE_LIMIT_FILE = os.path.join(
+    os.environ.get("CF_PROJECT_DIR", "/tmp"),
+    ".bluesky_last_post",
+)
+RATE_LIMIT_SECONDS = 60
+
+# Session state (populated by create_session / refresh_session)
+_session = {
+    "access_jwt": "",
+    "refresh_jwt": "",
+    "did": "",
+    "handle": "",
+}
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+
+def xrpc_url(method):
+    """Build an XRPC endpoint URL."""
+    return f"{BLUESKY_SERVICE}/xrpc/{method}"
+
+
+def http_request(url, data=None, method="GET", headers=None, timeout=20):
+    """Make an HTTP request. Returns (parsed_json, error_string)."""
+    hdrs = {"User-Agent": "CleansingFire/0.1 SocialBluesky"}
+    if headers:
+        hdrs.update(headers)
+    if data is not None:
+        if isinstance(data, dict):
+            data = json.dumps(data).encode("utf-8")
+            hdrs.setdefault("Content-Type", "application/json")
+        elif isinstance(data, str):
+            data = data.encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+            if body.strip():
+                return json.loads(body), None
+            return {}, None
+    except urllib.error.HTTPError as e:
+        try:
+            err_body = e.read().decode("utf-8")
+            err_json = json.loads(err_body)
+            msg = err_json.get("message", err_body[:200])
+        except Exception:
+            msg = str(e)
+        return None, f"HTTP {e.code}: {msg}"
+    except urllib.error.URLError as e:
+        return None, f"URL error: {e.reason}"
+    except Exception as e:
+        return None, str(e)
+
+
+def authed_request(url, data=None, method="GET", timeout=20):
+    """Make an authenticated XRPC request, refreshing the session if needed."""
+    if not _session["access_jwt"]:
+        err = create_session()
+        if err:
+            return None, f"Auth failed: {err}"
+
+    headers = {"Authorization": f"Bearer {_session['access_jwt']}"}
+    result, err = http_request(url, data=data, method=method,
+                               headers=headers, timeout=timeout)
+
+    # If we get a 400/401 with ExpiredToken, try refreshing once
+    if err and ("ExpiredToken" in str(err) or "HTTP 401" in str(err)):
+        refresh_err = refresh_session()
+        if refresh_err:
+            # Refresh failed; try full re-auth
+            create_err = create_session()
+            if create_err:
+                return None, f"Re-auth failed: {create_err}"
+        headers = {"Authorization": f"Bearer {_session['access_jwt']}"}
+        result, err = http_request(url, data=data, method=method,
+                                   headers=headers, timeout=timeout)
+
+    return result, err
+
+
+# ---------------------------------------------------------------------------
+# AT Protocol session management
+# ---------------------------------------------------------------------------
+
+def create_session():
+    """Authenticate and create a new session. Returns error string or None."""
+    if not BLUESKY_HANDLE or not BLUESKY_APP_PASSWORD:
+        return "BLUESKY_HANDLE and BLUESKY_APP_PASSWORD must be set"
+
+    url = xrpc_url("com.atproto.server.createSession")
+    payload = {
+        "identifier": BLUESKY_HANDLE,
+        "password": BLUESKY_APP_PASSWORD,
+    }
+    result, err = http_request(url, data=payload, method="POST")
+    if err:
+        return err
+
+    _session["access_jwt"] = result.get("accessJwt", "")
+    _session["refresh_jwt"] = result.get("refreshJwt", "")
+    _session["did"] = result.get("did", "")
+    _session["handle"] = result.get("handle", "")
+
+    if not _session["access_jwt"]:
+        return "No access token in session response"
+
+    sys.stderr.write(f"[social-bluesky] Session created for {_session['handle']}\n")
+    return None
+
+
+def refresh_session():
+    """Refresh an existing session. Returns error string or None."""
+    if not _session["refresh_jwt"]:
+        return "No refresh token available"
+
+    url = xrpc_url("com.atproto.server.refreshSession")
+    headers = {"Authorization": f"Bearer {_session['refresh_jwt']}"}
+    result, err = http_request(url, method="POST", headers=headers)
+    if err:
+        return err
+
+    _session["access_jwt"] = result.get("accessJwt", "")
+    _session["refresh_jwt"] = result.get("refreshJwt", "")
+    _session["did"] = result.get("did", _session["did"])
+    _session["handle"] = result.get("handle", _session["handle"])
+
+    sys.stderr.write("[social-bluesky] Session refreshed\n")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+def check_rate_limit():
+    """Check if we are within the rate limit. Returns error dict or None."""
+    try:
+        if os.path.exists(RATE_LIMIT_FILE):
+            with open(RATE_LIMIT_FILE, "r") as f:
+                last_ts = float(f.read().strip())
+            elapsed = time.time() - last_ts
+            if elapsed < RATE_LIMIT_SECONDS:
+                wait = int(RATE_LIMIT_SECONDS - elapsed)
+                return {
+                    "error": f"Rate limited. Wait {wait}s before posting again.",
+                    "error_code": "RATE_LIMITED",
+                    "retry_after_seconds": wait,
+                }
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def record_post_time():
+    """Record the current time as the last post time."""
+    try:
+        with open(RATE_LIMIT_FILE, "w") as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Text processing: facets (mentions, links, hashtags)
+# ---------------------------------------------------------------------------
+
+def parse_facets(text):
+    """Extract rich-text facets (mentions, links, hashtags) from text.
+
+    Returns a list of facet objects for the Bluesky record.
+    """
+    facets = []
+    text_bytes = text.encode("utf-8")
+
+    # URLs
+    url_pattern = re.compile(
+        r'https?://[^\s\)\]\},;"\'>]+', re.IGNORECASE
+    )
+    for m in url_pattern.finditer(text):
+        start = len(text[:m.start()].encode("utf-8"))
+        end = len(text[:m.end()].encode("utf-8"))
+        facets.append({
+            "index": {"byteStart": start, "byteEnd": end},
+            "features": [{
+                "$type": "app.bsky.richtext.facet#link",
+                "uri": m.group(0),
+            }],
+        })
+
+    # Mentions (@handle.bsky.social)
+    mention_pattern = re.compile(r'(?<!\w)@([a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?)')
+    for m in mention_pattern.finditer(text):
+        handle = m.group(1)
+        # Only include if it looks like a domain-style handle
+        if "." in handle:
+            start = len(text[:m.start()].encode("utf-8"))
+            end = len(text[:m.end()].encode("utf-8"))
+            # Resolve handle to DID
+            did = resolve_handle(handle)
+            if did:
+                facets.append({
+                    "index": {"byteStart": start, "byteEnd": end},
+                    "features": [{
+                        "$type": "app.bsky.richtext.facet#mention",
+                        "did": did,
+                    }],
+                })
+
+    # Hashtags
+    tag_pattern = re.compile(r'(?<!\w)#([a-zA-Z][a-zA-Z0-9_]*)')
+    for m in tag_pattern.finditer(text):
+        start = len(text[:m.start()].encode("utf-8"))
+        end = len(text[:m.end()].encode("utf-8"))
+        facets.append({
+            "index": {"byteStart": start, "byteEnd": end},
+            "features": [{
+                "$type": "app.bsky.richtext.facet#tag",
+                "tag": m.group(1),
+            }],
+        })
+
+    return facets
+
+
+def resolve_handle(handle):
+    """Resolve a handle to a DID. Returns DID string or None."""
+    url = xrpc_url("com.atproto.identity.resolveHandle")
+    url += f"?handle={urllib.parse.quote(handle)}"
+    result, err = http_request(url, timeout=10)
+    if err or not result:
+        return None
+    return result.get("did")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def now_iso():
+    """Return current UTC time in ISO 8601 format."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z"
+    )
+
+
+def parse_at_uri(uri):
+    """Parse an at:// URI into (repo, collection, rkey) or None."""
+    if not uri or not uri.startswith("at://"):
+        return None
+    parts = uri.replace("at://", "").split("/")
+    if len(parts) >= 3:
+        return {"repo": parts[0], "collection": parts[1], "rkey": parts[2]}
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Action: post
+# ---------------------------------------------------------------------------
+
+def action_post(input_data):
+    """Post a text to Bluesky."""
+    text = input_data.get("text", "").strip()
+    if not text:
+        return {"error": "Missing required field: 'text'", "error_code": "MISSING_FIELD"}
+
+    if len(text) > BLUESKY_CHAR_LIMIT:
+        return {
+            "error": f"Text exceeds {BLUESKY_CHAR_LIMIT} character limit "
+                     f"({len(text)} chars)",
+            "error_code": "TEXT_TOO_LONG",
+        }
+
+    # Rate limit check
+    rl = check_rate_limit()
+    if rl:
+        return rl
+
+    # Build the record
+    record = {
+        "$type": "app.bsky.feed.post",
+        "text": text,
+        "createdAt": now_iso(),
+    }
+
+    # Parse facets (links, mentions, hashtags)
+    facets = parse_facets(text)
+    if facets:
+        record["facets"] = facets
+
+    # Handle reply
+    reply_to = input_data.get("reply_to", "")
+    if reply_to:
+        reply_ref = build_reply_ref(reply_to)
+        if reply_ref:
+            record["reply"] = reply_ref
+        elif reply_to:
+            return {
+                "error": f"Could not resolve reply target: {reply_to}",
+                "error_code": "INVALID_REPLY_TARGET",
+            }
+
+    # Create the post
+    url = xrpc_url("com.atproto.repo.createRecord")
+    payload = {
+        "repo": _session.get("did") or BLUESKY_HANDLE,
+        "collection": "app.bsky.feed.post",
+        "record": record,
+    }
+
+    # Ensure session is active before accessing DID
+    if not _session["did"]:
+        err = create_session()
+        if err:
+            return {"error": f"Auth failed: {err}", "error_code": "AUTH_FAILED"}
+    payload["repo"] = _session["did"]
+
+    result, err = authed_request(url, data=payload, method="POST")
+    if err:
+        return {"error": f"Post failed: {err}", "error_code": "POST_FAILED"}
+
+    record_post_time()
+
+    return {
+        "uri": result.get("uri", ""),
+        "cid": result.get("cid", ""),
+        "text": text,
+        "char_count": len(text),
+        "type": "bluesky_post",
+    }
+
+
+def build_reply_ref(parent_uri):
+    """Build a reply reference object from a parent post URI."""
+    parsed = parse_at_uri(parent_uri)
+    if not parsed:
+        return None
+
+    # Fetch the parent post to get its CID and root
+    url = xrpc_url("com.atproto.repo.getRecord")
+    params = urllib.parse.urlencode({
+        "repo": parsed["repo"],
+        "collection": parsed["collection"],
+        "rkey": parsed["rkey"],
+    })
+    result, err = authed_request(f"{url}?{params}", method="GET")
+    if err or not result:
+        return None
+
+    parent_cid = result.get("cid", "")
+    parent_ref = {"uri": parent_uri, "cid": parent_cid}
+
+    # If the parent is itself a reply, use its root; otherwise parent is root
+    parent_record = result.get("value", {})
+    if "reply" in parent_record and "root" in parent_record["reply"]:
+        root_ref = parent_record["reply"]["root"]
+    else:
+        root_ref = parent_ref
+
+    return {"root": root_ref, "parent": parent_ref}
+
+
+# ---------------------------------------------------------------------------
+# Action: thread
+# ---------------------------------------------------------------------------
+
+def action_thread(input_data):
+    """Post a threaded series of posts."""
+    posts = input_data.get("posts", [])
+    if not posts or not isinstance(posts, list):
+        return {
+            "error": "Missing required field: 'posts' (list of strings)",
+            "error_code": "MISSING_FIELD",
+        }
+
+    if len(posts) < 2:
+        return {
+            "error": "Thread requires at least 2 posts",
+            "error_code": "INVALID_INPUT",
+        }
+
+    # Validate all post lengths before starting
+    for i, text in enumerate(posts):
+        if not isinstance(text, str) or not text.strip():
+            return {
+                "error": f"Post {i+1} is empty or not a string",
+                "error_code": "INVALID_INPUT",
+            }
+        if len(text) > BLUESKY_CHAR_LIMIT:
+            return {
+                "error": f"Post {i+1} exceeds {BLUESKY_CHAR_LIMIT} chars "
+                         f"({len(text)} chars)",
+                "error_code": "TEXT_TOO_LONG",
+            }
+
+    # Rate limit check
+    rl = check_rate_limit()
+    if rl:
+        return rl
+
+    # Ensure session is active
+    if not _session["did"]:
+        err = create_session()
+        if err:
+            return {"error": f"Auth failed: {err}", "error_code": "AUTH_FAILED"}
+
+    results = []
+    root_ref = None
+    parent_ref = None
+
+    for i, text in enumerate(posts):
+        text = text.strip()
+        record = {
+            "$type": "app.bsky.feed.post",
+            "text": text,
+            "createdAt": now_iso(),
+        }
+
+        facets = parse_facets(text)
+        if facets:
+            record["facets"] = facets
+
+        # Set reply reference for posts after the first
+        if parent_ref is not None:
+            record["reply"] = {
+                "root": root_ref,
+                "parent": parent_ref,
+            }
+
+        url = xrpc_url("com.atproto.repo.createRecord")
+        payload = {
+            "repo": _session["did"],
+            "collection": "app.bsky.feed.post",
+            "record": record,
+        }
+
+        result, err = authed_request(url, data=payload, method="POST")
+        if err:
+            return {
+                "error": f"Thread failed at post {i+1}: {err}",
+                "error_code": "THREAD_FAILED",
+                "posted": results,
+                "failed_at": i + 1,
+            }
+
+        post_ref = {
+            "uri": result.get("uri", ""),
+            "cid": result.get("cid", ""),
+        }
+
+        if i == 0:
+            root_ref = post_ref
+
+        parent_ref = post_ref
+
+        results.append({
+            "index": i + 1,
+            "uri": post_ref["uri"],
+            "cid": post_ref["cid"],
+            "text": text,
+            "char_count": len(text),
+        })
+
+        # Small delay between posts to be respectful
+        if i < len(posts) - 1:
+            time.sleep(0.5)
+
+    record_post_time()
+
+    return {
+        "thread_root": root_ref.get("uri", "") if root_ref else "",
+        "posts": results,
+        "count": len(results),
+        "type": "bluesky_thread",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Action: profile
+# ---------------------------------------------------------------------------
+
+def action_profile(input_data):
+    """Get profile info for a handle."""
+    handle = input_data.get("handle", "").strip()
+    if not handle:
+        return {
+            "error": "Missing required field: 'handle'",
+            "error_code": "MISSING_FIELD",
+        }
+
+    url = xrpc_url("app.bsky.actor.getProfile")
+    params = urllib.parse.urlencode({"actor": handle})
+
+    result, err = authed_request(f"{url}?{params}", method="GET")
+    if err:
+        return {"error": f"Profile lookup failed: {err}", "error_code": "PROFILE_FAILED"}
+
+    return {
+        "did": result.get("did", ""),
+        "handle": result.get("handle", ""),
+        "display_name": result.get("displayName", ""),
+        "description": result.get("description", ""),
+        "followers_count": result.get("followersCount", 0),
+        "follows_count": result.get("followsCount", 0),
+        "posts_count": result.get("postsCount", 0),
+        "avatar": result.get("avatar", ""),
+        "indexed_at": result.get("indexedAt", ""),
+        "type": "bluesky_profile",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Action: timeline
+# ---------------------------------------------------------------------------
+
+def action_timeline(input_data):
+    """Get recent posts from the authenticated user's timeline."""
+    limit = min(input_data.get("limit", 20), 100)
+    cursor = input_data.get("cursor", "")
+
+    url = xrpc_url("app.bsky.feed.getTimeline")
+    params = {"limit": limit}
+    if cursor:
+        params["cursor"] = cursor
+    url += "?" + urllib.parse.urlencode(params)
+
+    result, err = authed_request(url, method="GET")
+    if err:
+        return {"error": f"Timeline fetch failed: {err}", "error_code": "TIMELINE_FAILED"}
+
+    posts = []
+    for item in result.get("feed", []):
+        post = item.get("post", {})
+        record = post.get("record", {})
+        author = post.get("author", {})
+        posts.append({
+            "uri": post.get("uri", ""),
+            "cid": post.get("cid", ""),
+            "author_handle": author.get("handle", ""),
+            "author_name": author.get("displayName", ""),
+            "text": record.get("text", ""),
+            "created_at": record.get("createdAt", ""),
+            "like_count": post.get("likeCount", 0),
+            "repost_count": post.get("repostCount", 0),
+            "reply_count": post.get("replyCount", 0),
+        })
+
+    return {
+        "posts": posts,
+        "count": len(posts),
+        "cursor": result.get("cursor", ""),
+        "type": "bluesky_timeline",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Action: search
+# ---------------------------------------------------------------------------
+
+def action_search(input_data):
+    """Search posts on Bluesky."""
+    query = input_data.get("query", "").strip()
+    if not query:
+        return {"error": "Missing required field: 'query'", "error_code": "MISSING_FIELD"}
+
+    limit = min(input_data.get("limit", 25), 100)
+    cursor = input_data.get("cursor", "")
+
+    url = xrpc_url("app.bsky.feed.searchPosts")
+    params = {"q": query, "limit": limit}
+    if cursor:
+        params["cursor"] = cursor
+    url += "?" + urllib.parse.urlencode(params)
+
+    result, err = authed_request(url, method="GET")
+    if err:
+        return {"error": f"Search failed: {err}", "error_code": "SEARCH_FAILED"}
+
+    posts = []
+    for post in result.get("posts", []):
+        record = post.get("record", {})
+        author = post.get("author", {})
+        posts.append({
+            "uri": post.get("uri", ""),
+            "cid": post.get("cid", ""),
+            "author_handle": author.get("handle", ""),
+            "author_name": author.get("displayName", ""),
+            "text": record.get("text", ""),
+            "created_at": record.get("createdAt", ""),
+            "like_count": post.get("likeCount", 0),
+            "repost_count": post.get("repostCount", 0),
+            "reply_count": post.get("replyCount", 0),
+        })
+
+    return {
+        "query": query,
+        "posts": posts,
+        "count": len(posts),
+        "cursor": result.get("cursor", ""),
+        "type": "bluesky_search",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
+
+def main():
+    try:
+        raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+        if not raw.strip():
+            json.dump(
+                {
+                    "error": "No input provided. Send JSON on stdin with an 'action' field.",
+                    "error_code": "INVALID_INPUT",
+                    "details": {
+                        "valid_actions": ["post", "thread", "profile",
+                                          "timeline", "search"],
+                        "examples": {
+                            "post": {"action": "post", "text": "Hello Bluesky!"},
+                            "thread": {"action": "thread",
+                                       "posts": ["First post", "Second post"]},
+                            "profile": {"action": "profile",
+                                        "handle": "someone.bsky.social"},
+                            "timeline": {"action": "timeline", "limit": 20},
+                            "search": {"action": "search",
+                                       "query": "corporate lobbying"},
+                        },
+                        "env_required": ["BLUESKY_HANDLE", "BLUESKY_APP_PASSWORD"],
+                    },
+                },
+                sys.stdout,
+                indent=2,
+            )
+            sys.exit(2)
+
+        input_data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        json.dump(
+            {"error": f"Invalid JSON input: {e}", "error_code": "INVALID_INPUT"},
+            sys.stdout,
+            indent=2,
+        )
+        sys.exit(2)
+
+    if not isinstance(input_data, dict):
+        json.dump(
+            {"error": "Input must be a JSON object", "error_code": "INVALID_INPUT"},
+            sys.stdout,
+            indent=2,
+        )
+        sys.exit(2)
+
+    action = input_data.get("action", "")
+    if not action:
+        json.dump(
+            {
+                "error": "Missing required field: 'action'",
+                "error_code": "MISSING_FIELD",
+                "details": {
+                    "valid_actions": ["post", "thread", "profile",
+                                      "timeline", "search"],
+                },
+            },
+            sys.stdout,
+            indent=2,
+        )
+        sys.exit(2)
+
+    # Dispatch
+    if action == "post":
+        result = action_post(input_data)
+    elif action == "thread":
+        result = action_thread(input_data)
+    elif action == "profile":
+        result = action_profile(input_data)
+    elif action == "timeline":
+        result = action_timeline(input_data)
+    elif action == "search":
+        result = action_search(input_data)
+    else:
+        result = {
+            "error": f"Unknown action: '{action}'",
+            "error_code": "UNKNOWN_ACTION",
+            "details": {
+                "valid_actions": ["post", "thread", "profile",
+                                  "timeline", "search"],
+            },
+        }
+
+    json.dump(result, sys.stdout, indent=2)
+
+    # Exit with appropriate code
+    if "error" in result:
+        error_code = result.get("error_code", "")
+        if error_code in ("INVALID_INPUT", "MISSING_FIELD", "UNKNOWN_ACTION"):
+            sys.exit(2)
+        else:
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
