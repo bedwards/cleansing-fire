@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corporate Power Map — Cleansing Fire</title>
+<meta name="description" content="Interactive force-directed graph of corporate power relationships. Who owns what, who funds whom, and where the revolving door spins.">
+<meta name="theme-color" content="#ff4400">
+<meta property="og:title" content="Corporate Power Map — Cleansing Fire">
+<meta property="og:description" content="Interactive visualization of corporate power networks.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fire-1: #ff4400;
+    --fire-2: #ff8800;
+    --fire-3: #ffcc00;
+    --ash: #999;
+    --smoke: #555;
+    --night: #0a0a0a;
+    --bone: #eee;
+    --focus: #00ccff;
+    --font: 'Lexend', sans-serif;
+    --fs-base: 20px;
+    --fs-label: 18px;
+    --fs-heading: 22px;
+    --node-corporation: #cc2200;
+    --node-pe: #dd7700;
+    --node-lobbying: #ccaa00;
+    --node-thinktank: #228844;
+    --node-media: #2266bb;
+    --node-politician: #8833aa;
+    --node-finance: #cc4488;
+    --node-international: #4488aa;
+  }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  .skip-link {
+    position: absolute; top: -100%; left: 50%; transform: translateX(-50%);
+    background: var(--fire-1); color: #fff; padding: 0.75rem 1.5rem;
+    font-family: var(--font); font-size: var(--fs-base); z-index: 1000;
+    border-radius: 0 0 8px 8px; text-decoration: none;
+  }
+  .skip-link:focus { top: 0; }
+
+  body {
+    background: var(--night); color: var(--bone);
+    font-family: var(--font); font-size: var(--fs-base); line-height: 1.6;
+    overflow: hidden; height: 100vh; display: flex; flex-direction: column;
+  }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+
+  /* Header */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.75rem 1.5rem; border-bottom: 1px solid #222;
+    background: rgba(10,10,10,0.95); z-index: 100; flex-shrink: 0;
+  }
+  header h1 {
+    font-size: var(--fs-heading); font-weight: 600; letter-spacing: 0.05em;
+    background: linear-gradient(90deg, var(--fire-3), var(--fire-1));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  header nav { display: flex; gap: 1.25rem; align-items: center; }
+  header nav a {
+    color: var(--ash); text-decoration: none; font-size: var(--fs-label);
+    transition: color 0.2s;
+  }
+  header nav a:hover { color: var(--fire-2); }
+
+  /* Controls bar */
+  .controls {
+    display: flex; align-items: center; gap: 1rem; padding: 0.6rem 1.5rem;
+    border-bottom: 1px solid #1a1a1a; background: #0d0d0d;
+    flex-shrink: 0; flex-wrap: wrap; z-index: 90;
+  }
+  .search-box {
+    position: relative; flex: 1; min-width: 200px; max-width: 400px;
+  }
+  .search-box input {
+    width: 100%; padding: 0.5rem 0.75rem 0.5rem 2.25rem;
+    background: #151515; border: 1px solid #333; border-radius: 6px;
+    color: var(--bone); font-family: var(--font); font-size: var(--fs-label);
+    transition: border-color 0.2s;
+  }
+  .search-box input:focus { border-color: var(--fire-2); outline: none; }
+  .search-box input::placeholder { color: var(--smoke); }
+  .search-box .search-icon {
+    position: absolute; left: 0.7rem; top: 50%; transform: translateY(-50%);
+    color: var(--smoke); font-size: 14px; pointer-events: none;
+  }
+
+  .filter-group {
+    display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;
+  }
+  .filter-btn {
+    padding: 0.3rem 0.7rem; border-radius: 4px; border: 1px solid #333;
+    background: #151515; color: var(--ash); font-family: var(--font);
+    font-size: 14px; cursor: pointer; transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .filter-btn:hover { border-color: var(--fire-2); color: var(--bone); }
+  .filter-btn.active { border-color: var(--fire-1); color: var(--bone); background: #221100; }
+  .filter-btn .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 4px; vertical-align: middle;
+  }
+
+  .controls-right {
+    display: flex; gap: 0.5rem; align-items: center; margin-left: auto;
+  }
+  .ctrl-btn {
+    padding: 0.35rem 0.65rem; border-radius: 4px; border: 1px solid #333;
+    background: #151515; color: var(--ash); font-family: var(--font);
+    font-size: 14px; cursor: pointer; transition: all 0.2s;
+  }
+  .ctrl-btn:hover { border-color: var(--fire-2); color: var(--bone); }
+
+  /* Graph container */
+  .graph-container {
+    flex: 1; position: relative; overflow: hidden;
+  }
+  svg { width: 100%; height: 100%; display: block; }
+  svg text {
+    font-family: var(--font);
+  }
+
+  /* Info panel */
+  .info-panel {
+    position: absolute; top: 1rem; right: 1rem; width: 340px;
+    max-height: calc(100% - 2rem); overflow-y: auto;
+    background: rgba(15,15,15,0.95); border: 1px solid #333;
+    border-radius: 8px; padding: 1.25rem; z-index: 50;
+    display: none; backdrop-filter: blur(8px);
+  }
+  .info-panel.visible { display: block; }
+  .info-panel h2 {
+    font-size: var(--fs-heading); font-weight: 600; margin-bottom: 0.25rem;
+    line-height: 1.3;
+  }
+  .info-panel .type-badge {
+    display: inline-block; padding: 0.15rem 0.55rem; border-radius: 3px;
+    font-size: 13px; font-weight: 500; margin-bottom: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .info-panel .detail { font-size: var(--fs-label); color: var(--ash); margin-bottom: 0.5rem; line-height: 1.5; }
+  .info-panel .connections-title {
+    font-size: var(--fs-label); font-weight: 600; color: var(--bone);
+    margin: 0.75rem 0 0.4rem; border-top: 1px solid #222; padding-top: 0.6rem;
+  }
+  .info-panel ul { list-style: none; }
+  .info-panel li {
+    font-size: 15px; color: var(--ash); padding: 0.2rem 0;
+    cursor: pointer; transition: color 0.15s;
+  }
+  .info-panel li:hover { color: var(--fire-2); }
+  .info-panel li .conn-type {
+    font-size: 12px; color: var(--smoke); margin-left: 0.3rem;
+  }
+  .info-panel .close-btn {
+    position: absolute; top: 0.6rem; right: 0.75rem;
+    background: none; border: none; color: var(--smoke); font-size: 20px;
+    cursor: pointer; font-family: var(--font); line-height: 1;
+  }
+  .info-panel .close-btn:hover { color: var(--fire-1); }
+
+  /* Legend */
+  .legend {
+    position: absolute; bottom: 1rem; left: 1rem;
+    background: rgba(15,15,15,0.9); border: 1px solid #222;
+    border-radius: 8px; padding: 0.75rem 1rem; z-index: 50;
+    backdrop-filter: blur(8px);
+  }
+  .legend h3 {
+    font-size: 14px; font-weight: 600; color: var(--bone);
+    margin-bottom: 0.4rem; letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .legend-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 0.15rem 1.5rem;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-size: 13px; color: var(--ash);
+  }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .legend-section {
+    margin-top: 0.5rem; padding-top: 0.4rem; border-top: 1px solid #222;
+  }
+  .legend-section h4 {
+    font-size: 12px; font-weight: 500; color: var(--smoke);
+    margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .edge-legend-item {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-size: 12px; color: var(--smoke);
+  }
+  .edge-line {
+    width: 20px; height: 2px; flex-shrink: 0;
+  }
+
+  /* Tooltip */
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 200;
+    background: rgba(20,20,20,0.95); border: 1px solid #444;
+    border-radius: 5px; padding: 0.4rem 0.65rem;
+    font-size: 14px; color: var(--bone); white-space: nowrap;
+    opacity: 0; transition: opacity 0.15s;
+    font-family: var(--font); backdrop-filter: blur(4px);
+  }
+  .tooltip.visible { opacity: 1; }
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  @media (max-width: 768px) {
+    header { padding: 0.5rem 1rem; flex-wrap: wrap; gap: 0.5rem; }
+    header h1 { font-size: 18px; }
+    .controls { padding: 0.5rem 1rem; }
+    .info-panel { width: calc(100% - 2rem); left: 1rem; right: 1rem; }
+    .legend { display: none; }
+    .filter-btn { font-size: 12px; padding: 0.25rem 0.5rem; }
+  }
+</style>
+</head>
+<body>
+
+<a href="#graph" class="skip-link">Skip to visualization</a>
+
+<header>
+  <h1>Corporate Power Map</h1>
+  <nav aria-label="Site navigation">
+    <a href="index.html">Home</a>
+    <a href="humans.html">Humans</a>
+    <a href="agents.html">Agents</a>
+    <a href="https://github.com/bedwards/cleansing-fire">GitHub</a>
+  </nav>
+</header>
+
+<div class="controls" role="toolbar" aria-label="Graph controls">
+  <div class="search-box">
+    <span class="search-icon" aria-hidden="true">&#x1F50D;</span>
+    <label for="search-input" class="sr-only">Search entities</label>
+    <input type="text" id="search-input" placeholder="Search entities..." autocomplete="off" aria-label="Search for corporations, firms, people, or organizations">
+  </div>
+
+  <div class="filter-group" role="group" aria-label="Filter by entity type">
+    <button class="filter-btn active" data-type="all" aria-pressed="true">All</button>
+    <button class="filter-btn" data-type="corporation" aria-pressed="false"><span class="dot" style="background:var(--node-corporation)"></span>Corp</button>
+    <button class="filter-btn" data-type="pe" aria-pressed="false"><span class="dot" style="background:var(--node-pe)"></span>PE</button>
+    <button class="filter-btn" data-type="finance" aria-pressed="false"><span class="dot" style="background:var(--node-finance)"></span>Finance</button>
+    <button class="filter-btn" data-type="lobbying" aria-pressed="false"><span class="dot" style="background:var(--node-lobbying)"></span>Lobby</button>
+    <button class="filter-btn" data-type="thinktank" aria-pressed="false"><span class="dot" style="background:var(--node-thinktank)"></span>Think Tank</button>
+    <button class="filter-btn" data-type="media" aria-pressed="false"><span class="dot" style="background:var(--node-media)"></span>Media</button>
+    <button class="filter-btn" data-type="politician" aria-pressed="false"><span class="dot" style="background:var(--node-politician)"></span>Political</button>
+    <button class="filter-btn" data-type="international" aria-pressed="false"><span class="dot" style="background:var(--node-international)"></span>Intl</button>
+  </div>
+
+  <div class="controls-right">
+    <button class="ctrl-btn" id="btn-reset" aria-label="Reset view">Reset</button>
+    <button class="ctrl-btn" id="btn-freeze" aria-label="Freeze simulation">Freeze</button>
+  </div>
+</div>
+
+<main id="graph" class="graph-container" role="img" aria-label="Interactive force-directed graph showing corporate power relationships. Use Tab to navigate nodes, Enter to select, Escape to deselect.">
+  <svg id="viz" aria-hidden="true"></svg>
+  <div class="tooltip" id="tooltip" role="tooltip"></div>
+
+  <div class="info-panel" id="info-panel" role="complementary" aria-label="Entity details" aria-live="polite">
+    <button class="close-btn" id="panel-close" aria-label="Close details panel">&times;</button>
+    <h2 id="panel-title"></h2>
+    <div class="type-badge" id="panel-badge"></div>
+    <div class="detail" id="panel-detail"></div>
+    <div class="connections-title">Connections</div>
+    <ul id="panel-connections"></ul>
+  </div>
+
+  <div class="legend" aria-label="Map legend">
+    <h3>Nodes</h3>
+    <div class="legend-grid">
+      <div class="legend-item"><span class="legend-dot" style="background:var(--node-corporation)"></span> Corporation</div>
+      <div class="legend-item"><span class="legend-dot" style="background:var(--node-pe)"></span> Private Equity</div>
+      <div class="legend-item"><span class="legend-dot" style="background:var(--node-finance)"></span> Finance</div>
+      <div class="legend-item"><span class="legend-dot" style="background:var(--node-lobbying)"></span> Lobbying</div>
+      <div class="legend-item"><span class="legend-dot" style="background:var(--node-thinktank)"></span> Think Tank</div>
+      <div class="legend-item"><span class="legend-dot" style="background:var(--node-media)"></span> Media</div>
+      <div class="legend-item"><span class="legend-dot" style="background:var(--node-politician)"></span> Political</div>
+      <div class="legend-item"><span class="legend-dot" style="background:var(--node-international)"></span> International</div>
+    </div>
+    <div class="legend-section">
+      <h4>Edges</h4>
+      <div class="edge-legend-item"><span class="edge-line" style="background:#ff4400"></span> Ownership</div>
+      <div class="edge-legend-item"><span class="edge-line" style="background:#ffcc00"></span> Funding</div>
+      <div class="edge-legend-item"><span class="edge-line" style="background:#00ccff"></span> Lobbying</div>
+      <div class="edge-legend-item"><span class="edge-line" style="background:#88cc44"></span> Board Interlock</div>
+      <div class="edge-legend-item"><span class="edge-line" style="background:#cc44ff"></span> Revolving Door</div>
+    </div>
+  </div>
+</main>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+(function() {
+  "use strict";
+
+  // =====================================================
+  // DATA: Real entities and relationships from research
+  // =====================================================
+
+  const TYPE_COLORS = {
+    corporation:   "#cc2200",
+    pe:            "#dd7700",
+    finance:       "#cc4488",
+    lobbying:      "#ccaa00",
+    thinktank:     "#228844",
+    media:         "#2266bb",
+    politician:    "#8833aa",
+    international: "#4488aa"
+  };
+
+  const EDGE_COLORS = {
+    ownership:     "#ff4400",
+    funding:       "#ffcc00",
+    lobbying:      "#00ccff",
+    board:         "#88cc44",
+    revolving_door:"#cc44ff"
+  };
+
+  const EDGE_LABELS = {
+    ownership:      "Ownership",
+    funding:        "Funding",
+    lobbying:       "Lobbying",
+    board:          "Board Interlock",
+    revolving_door: "Revolving Door"
+  };
+
+  const TYPE_LABELS = {
+    corporation:   "Corporation",
+    pe:            "Private Equity",
+    finance:       "Finance",
+    lobbying:      "Lobbying",
+    thinktank:     "Think Tank",
+    media:         "Media",
+    politician:    "Political",
+    international: "International"
+  };
+
+  // Nodes: id, label, type, detail
+  const nodes = [
+    // Private Equity
+    { id: "blackstone", label: "Blackstone", type: "pe", detail: "$1T AUM. Largest landlord in America (~350,000 rental units). Real estate, logistics, life sciences." },
+    { id: "apollo", label: "Apollo Global Mgmt", type: "pe", detail: "$840B AUM. Insurance (Athene), distressed assets, credit, retirement services." },
+    { id: "kkr", label: "KKR", type: "pe", detail: "$638B AUM. Insurance, media, healthcare, infrastructure. Aiming for $1T within 5 years." },
+    { id: "carlyle", label: "The Carlyle Group", type: "pe", detail: "$420B AUM. Defense, aerospace, healthcare, technology, energy." },
+    { id: "cerberus", label: "Cerberus Capital", type: "pe", detail: "Owned Steward Health Care (2010-2020). Six hospitals closed, 2,650+ workers laid off." },
+    { id: "alden", label: "Alden Global Capital", type: "pe", detail: "Hedge fund. Largest newspaper chain owner in the U.S. Known for gutting local newsrooms." },
+
+    // Big Tech Corporations
+    { id: "amazon", label: "Amazon", type: "corporation", detail: "Targeting 20% of U.S. grocery market by 2030. 1M+ warehouse robots. FBA creates seller dependency. Ring/Flock: 80K AI cameras." },
+    { id: "google", label: "Alphabet / Google", type: "corporation", detail: "8.5B searches/day. 77% of revenue from advertising. 530% increase in user data shared with law enforcement (2014-2024)." },
+    { id: "meta", label: "Meta", type: "corporation", detail: "98% of revenue from advertising. 675% surge in user accounts shared with law enforcement (2014-2024)." },
+    { id: "apple", label: "Apple", type: "corporation", detail: "Part of Big Five tech. Data disclosures to law enforcement climbed 621% (2014-2024). $3T+ market cap." },
+    { id: "microsoft", label: "Microsoft", type: "corporation", detail: "Part of Big Five tech. $3T+ market cap. Azure, Office, LinkedIn, GitHub, OpenAI partnership." },
+
+    // Retail / Supply Chain
+    { id: "walmart", label: "Walmart", type: "corporation", detail: "60% of revenue from groceries. Opened proprietary meat-processing facility. Effective veto power over consumer goods suppliers." },
+
+    // Finance / Asset Management
+    { id: "blackrock", label: "BlackRock", type: "finance", detail: "$10T+ AUM. Largest asset manager on Earth. 29.4% ETF market share. Largest shareholder in most S&P 500 companies." },
+    { id: "vanguard", label: "Vanguard", type: "finance", detail: "30.1% ETF market share. Largest shareholder in most S&P 500 companies. Operates major DAF sponsor." },
+    { id: "statestreet", label: "State Street", type: "finance", detail: "14.8% ETF market share. SPDR ETFs. Custody of $43T+. Big Three backed 98.7% of management resolutions in 2025." },
+    { id: "jpmorgan", label: "JPMorgan Chase", type: "finance", detail: "Largest U.S. bank. Identified in Vitali et al. (2011) as part of the 147-company core controlling 40% of transnational corporate value." },
+    { id: "fidelity", label: "Fidelity", type: "finance", detail: "Operates largest DAF sponsor. DAFs funneled $171M+ to Project 2025 nonprofits. Anonymizing intermediary for dark money." },
+
+    // Credit Rating
+    { id: "moodys", label: "Moody's", type: "finance", detail: "~40% of global ratings market. Issuer-pays model creates structural conflict of interest. Failed to flag 2008 crisis risks." },
+    { id: "spglobal", label: "S&P Global", type: "finance", detail: "~40% of global ratings market. Owns Panjiva trade intelligence. Ratings influence trillions in investments." },
+
+    // Media Conglomerates
+    { id: "comcast", label: "Comcast / NBCUniversal", type: "media", detail: "NBC, MSNBC, Universal Pictures, Sky. Roberts family control via supervoting shares. Spun off cable networks into Versant (2025)." },
+    { id: "disney", label: "Walt Disney Co.", type: "media", detail: "ABC, ESPN, Hulu, Disney+, Marvel, Lucasfilm, Pixar, 20th Century Studios, National Geographic." },
+    { id: "wbd", label: "Warner Bros. Discovery", type: "media", detail: "CNN, HBO, TNT, TBS, Discovery+, Max. CEO David Zaslav. Plans to split streaming from cable (2025)." },
+    { id: "foxcorp", label: "Fox Corporation", type: "media", detail: "Fox News, Fox Business, Fox Sports. Murdoch family control via supervoting shares." },
+    { id: "newscorp", label: "News Corp", type: "media", detail: "Wall Street Journal, New York Post, HarperCollins, Dow Jones, realtor.com. Murdoch family control." },
+    { id: "paramount", label: "Paramount Skydance", type: "media", detail: "CBS, Paramount Pictures, MTV, BET, Nickelodeon, Showtime, Pluto TV. Ellison family acquired August 2025." },
+
+    // Think Tanks / Advocacy
+    { id: "heritage", label: "Heritage Foundation", type: "thinktank", detail: "Architect of Project 2025. Funded by Koch network, billionaire donors, and DAF dark money ($171M+ via DAFs)." },
+    { id: "alec", label: "ALEC", type: "thinktank", detail: "American Legislative Exchange Council. Koch Foundation donated $1.2M+ since 2020 via Stand Together Trust. Writes model legislation." },
+    { id: "cato", label: "Cato Institute", type: "thinktank", detail: "Libertarian think tank. Co-founded by Charles Koch in 1977. Advocates deregulation and limited government." },
+    { id: "chambercommerce", label: "U.S. Chamber of Commerce", type: "lobbying", detail: "Largest lobbying org in the U.S. Lewis Powell's 1971 memo outlined strategy for corporate capture of political institutions." },
+    { id: "donorstrust", label: "Donors Trust", type: "lobbying", detail: "Specialized dark money intermediary. Shields original donor identities while making grants to political organizations." },
+    { id: "bradley", label: "Bradley Impact Fund", type: "lobbying", detail: "Dark money intermediary. Shields donor identities. Funnels money to conservative political organizations." },
+
+    // Billionaires / Political Figures
+    { id: "koch_network", label: "Koch Network", type: "politician", detail: "Charles Koch Foundation + Stand Together Trust. $1.2M+ to ALEC. Six billionaire fortunes bankrolled Project 2025." },
+    { id: "schwarzman", label: "Stephen Schwarzman", type: "politician", detail: "Blackstone CEO. Collected $1B+ in pay and dividends while homelessness rose 18% to record highs (2024)." },
+    { id: "larry_fink", label: "Laurence D. Fink", type: "politician", detail: "BlackRock CEO. Elected WEF Co-Chair August 2025. Runs the largest asset manager on Earth ($10T+ AUM)." },
+    { id: "murdoch", label: "Murdoch Family", type: "politician", detail: "Control Fox Corp and News Corp via supervoting shares. Dominant force in conservative media globally." },
+    { id: "ellison", label: "Ellison Family", type: "politician", detail: "Acquired Paramount/Skydance August 2025. Larry Ellison is co-founder of Oracle." },
+    { id: "gates_foundation", label: "Gates Foundation", type: "thinktank", detail: "Plans to spend $10B/year until 2045. Network diplomacy challenges democratic accountability across world regions." },
+
+    // International
+    { id: "wef", label: "World Economic Forum", type: "international", detail: "1,000 biggest multinationals as members. Board includes World Bank president, IMF managing director. Fink elected Co-Chair 2025." },
+    { id: "imf", label: "IMF", type: "international", detail: "Conditionalities attached to loans forced austerity, privatization, deregulation on dozens of countries." },
+    { id: "worldbank", label: "World Bank", type: "international", detail: "Exported Washington Consensus globally. Structural adjustment programs required market liberalization." },
+    { id: "swift", label: "SWIFT", type: "international", detail: "Processes majority of international financial transactions. U.S. dollar is ~50% of transaction value. Financial nuclear weapon." },
+    { id: "bis", label: "BIS", type: "international", detail: "Bank for International Settlements. Central bank of central banks. Sets Basel III capital standards." },
+
+    // Lobbying / Dark Money
+    { id: "opensecrets", label: "Dark Money System", type: "lobbying", detail: "Record $1.9B in 2024 federal races. Shell companies + 501(c) nonprofits gave $1.3B to super PACs without disclosure." },
+    { id: "citizens_united", label: "Citizens United", type: "politician", detail: "2010 Supreme Court ruling. Corporations have First Amendment rights to unlimited election spending. $6.4B in super PAC spending since." },
+  ];
+
+  // Edges: source, target, type, label
+  const edges = [
+    // Ownership / Control
+    { source: "schwarzman", target: "blackstone", type: "ownership", label: "CEO" },
+    { source: "larry_fink", target: "blackrock", type: "ownership", label: "CEO" },
+    { source: "murdoch", target: "foxcorp", type: "ownership", label: "Supervoting shares" },
+    { source: "murdoch", target: "newscorp", type: "ownership", label: "Supervoting shares" },
+    { source: "ellison", target: "paramount", type: "ownership", label: "Acquired Aug 2025" },
+    { source: "cerberus", target: "blackstone", type: "board", label: "PE ecosystem" },
+
+    // Big Three ownership of everything
+    { source: "blackrock", target: "apple", type: "ownership", label: "Top institutional holder" },
+    { source: "blackrock", target: "microsoft", type: "ownership", label: "Top institutional holder" },
+    { source: "blackrock", target: "google", type: "ownership", label: "Top institutional holder" },
+    { source: "blackrock", target: "amazon", type: "ownership", label: "Top institutional holder" },
+    { source: "blackrock", target: "meta", type: "ownership", label: "Top institutional holder" },
+    { source: "vanguard", target: "apple", type: "ownership", label: "Top institutional holder" },
+    { source: "vanguard", target: "microsoft", type: "ownership", label: "Top institutional holder" },
+    { source: "vanguard", target: "google", type: "ownership", label: "Top institutional holder" },
+    { source: "vanguard", target: "amazon", type: "ownership", label: "Top institutional holder" },
+    { source: "vanguard", target: "meta", type: "ownership", label: "Top institutional holder" },
+    { source: "statestreet", target: "apple", type: "ownership", label: "Top institutional holder" },
+    { source: "statestreet", target: "microsoft", type: "ownership", label: "Top institutional holder" },
+    { source: "statestreet", target: "jpmorgan", type: "ownership", label: "Major shareholder" },
+
+    // PE sector ownership
+    { source: "blackstone", target: "amazon", type: "board", label: "Real estate/logistics overlap" },
+    { source: "kkr", target: "comcast", type: "ownership", label: "Media investments" },
+    { source: "apollo", target: "wbd", type: "ownership", label: "Media/entertainment investments" },
+    { source: "carlyle", target: "chambercommerce", type: "lobbying", label: "Defense/aerospace lobbying" },
+
+    // Koch network funding
+    { source: "koch_network", target: "heritage", type: "funding", label: "Bankrolled Project 2025" },
+    { source: "koch_network", target: "alec", type: "funding", label: "$1.2M+ via Stand Together Trust" },
+    { source: "koch_network", target: "cato", type: "funding", label: "Co-founded 1977" },
+    { source: "koch_network", target: "chambercommerce", type: "funding", label: "Major donor" },
+
+    // Dark money flows
+    { source: "fidelity", target: "donorstrust", type: "funding", label: "DAF intermediary" },
+    { source: "fidelity", target: "heritage", type: "funding", label: "DAF to Project 2025 ($171M+)" },
+    { source: "vanguard", target: "donorstrust", type: "funding", label: "DAF intermediary" },
+    { source: "donorstrust", target: "heritage", type: "funding", label: "Dark money conduit" },
+    { source: "donorstrust", target: "alec", type: "funding", label: "Dark money conduit" },
+    { source: "bradley", target: "heritage", type: "funding", label: "Dark money conduit" },
+    { source: "opensecrets", target: "citizens_united", type: "funding", label: "$1.9B dark money (2024)" },
+
+    // Corporate lobbying
+    { source: "amazon", target: "chambercommerce", type: "lobbying", label: "Member" },
+    { source: "google", target: "chambercommerce", type: "lobbying", label: "Member" },
+    { source: "meta", target: "chambercommerce", type: "lobbying", label: "Member" },
+    { source: "apple", target: "chambercommerce", type: "lobbying", label: "Member" },
+    { source: "microsoft", target: "chambercommerce", type: "lobbying", label: "Member" },
+    { source: "walmart", target: "chambercommerce", type: "lobbying", label: "Member" },
+    { source: "jpmorgan", target: "chambercommerce", type: "lobbying", label: "Member" },
+
+    // WEF connections
+    { source: "larry_fink", target: "wef", type: "board", label: "Co-Chair (elected Aug 2025)" },
+    { source: "blackrock", target: "wef", type: "board", label: "Corporate member" },
+    { source: "jpmorgan", target: "wef", type: "board", label: "Corporate member" },
+    { source: "google", target: "wef", type: "board", label: "Corporate member" },
+    { source: "amazon", target: "wef", type: "board", label: "Corporate member" },
+    { source: "imf", target: "wef", type: "board", label: "MD on Board of Trustees" },
+    { source: "worldbank", target: "wef", type: "board", label: "President on Board of Trustees" },
+
+    // International financial system
+    { source: "bis", target: "jpmorgan", type: "lobbying", label: "Basel III capital standards" },
+    { source: "swift", target: "jpmorgan", type: "board", label: "Transaction processing" },
+    { source: "imf", target: "worldbank", type: "board", label: "Washington Consensus" },
+    { source: "moodys", target: "jpmorgan", type: "lobbying", label: "Rates debt" },
+    { source: "spglobal", target: "jpmorgan", type: "lobbying", label: "Rates debt" },
+    { source: "moodys", target: "spglobal", type: "board", label: "Duopoly: 80% of ratings market" },
+
+    // Media ownership connections
+    { source: "alden", target: "comcast", type: "board", label: "Media ecosystem" },
+    { source: "disney", target: "comcast", type: "board", label: "Media competition/interlocks" },
+    { source: "foxcorp", target: "newscorp", type: "ownership", label: "Murdoch family control" },
+
+    // Revolving door
+    { source: "heritage", target: "citizens_united", type: "revolving_door", label: "Project 2025 policy pipeline" },
+    { source: "chambercommerce", target: "citizens_united", type: "revolving_door", label: "Powell memo to Citizens United" },
+    { source: "alec", target: "citizens_united", type: "revolving_door", label: "Model legislation pipeline" },
+
+    // Gates Foundation
+    { source: "gates_foundation", target: "wef", type: "board", label: "Policy influence" },
+    { source: "gates_foundation", target: "worldbank", type: "funding", label: "Network diplomacy" },
+    { source: "gates_foundation", target: "imf", type: "funding", label: "Policy influence" },
+
+    // PE healthcare
+    { source: "cerberus", target: "carlyle", type: "board", label: "PE healthcare overlap" },
+    { source: "apollo", target: "blackstone", type: "board", label: "PE ecosystem" },
+    { source: "kkr", target: "apollo", type: "board", label: "PE ecosystem" },
+  ];
+
+  // =====================================================
+  // D3 VISUALIZATION
+  // =====================================================
+
+  const svg = d3.select("#viz");
+  const container = document.querySelector(".graph-container");
+  const tooltip = document.getElementById("tooltip");
+  const panel = document.getElementById("info-panel");
+
+  let width = container.clientWidth;
+  let height = container.clientHeight;
+
+  svg.attr("viewBox", [0, 0, width, height]);
+
+  // Create defs for arrow markers
+  const defs = svg.append("defs");
+  Object.entries(EDGE_COLORS).forEach(([type, color]) => {
+    defs.append("marker")
+      .attr("id", "arrow-" + type)
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 20)
+      .attr("refY", 0)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path")
+      .attr("fill", color)
+      .attr("d", "M0,-4L10,0L0,4")
+      .attr("opacity", 0.6);
+  });
+
+  const g = svg.append("g");
+
+  // Zoom
+  const zoom = d3.zoom()
+    .scaleExtent([0.15, 5])
+    .on("zoom", (event) => {
+      g.attr("transform", event.transform);
+    });
+  svg.call(zoom);
+
+  // Build simulation data
+  const simNodes = nodes.map(d => ({ ...d }));
+  const simEdges = edges.map(d => ({ ...d }));
+
+  // Radius based on number of connections
+  const connectionCount = {};
+  nodes.forEach(n => { connectionCount[n.id] = 0; });
+  edges.forEach(e => {
+    connectionCount[e.source] = (connectionCount[e.source] || 0) + 1;
+    connectionCount[e.target] = (connectionCount[e.target] || 0) + 1;
+  });
+
+  function getRadius(id) {
+    const count = connectionCount[id] || 0;
+    return Math.max(6, Math.min(22, 5 + count * 1.8));
+  }
+
+  // Force simulation
+  const simulation = d3.forceSimulation(simNodes)
+    .force("link", d3.forceLink(simEdges).id(d => d.id).distance(120).strength(0.4))
+    .force("charge", d3.forceManyBody().strength(-350).distanceMax(500))
+    .force("center", d3.forceCenter(width / 2, height / 2))
+    .force("collision", d3.forceCollide().radius(d => getRadius(d.id) + 8))
+    .force("x", d3.forceX(width / 2).strength(0.03))
+    .force("y", d3.forceY(height / 2).strength(0.03));
+
+  // Draw edges
+  const linkGroup = g.append("g").attr("class", "links");
+  const link = linkGroup.selectAll("line")
+    .data(simEdges)
+    .join("line")
+    .attr("stroke", d => EDGE_COLORS[d.type] || "#333")
+    .attr("stroke-opacity", 0.3)
+    .attr("stroke-width", 1.5)
+    .attr("marker-end", d => "url(#arrow-" + d.type + ")");
+
+  // Draw nodes
+  const nodeGroup = g.append("g").attr("class", "nodes");
+  const node = nodeGroup.selectAll("g")
+    .data(simNodes)
+    .join("g")
+    .attr("class", "node-g")
+    .attr("tabindex", "0")
+    .attr("role", "button")
+    .attr("aria-label", d => d.label + ", " + TYPE_LABELS[d.type])
+    .call(drag(simulation));
+
+  node.append("circle")
+    .attr("r", d => getRadius(d.id))
+    .attr("fill", d => TYPE_COLORS[d.type] || "#555")
+    .attr("stroke", "#000")
+    .attr("stroke-width", 1.5)
+    .attr("opacity", 0.85);
+
+  // Labels
+  const labelGroup = g.append("g").attr("class", "labels");
+  const labels = labelGroup.selectAll("text")
+    .data(simNodes)
+    .join("text")
+    .attr("font-size", "11px")
+    .attr("fill", "#bbb")
+    .attr("text-anchor", "middle")
+    .attr("dy", d => getRadius(d.id) + 14)
+    .attr("pointer-events", "none")
+    .text(d => d.label);
+
+  // Tick
+  simulation.on("tick", () => {
+    link
+      .attr("x1", d => d.source.x)
+      .attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x)
+      .attr("y2", d => d.target.y);
+
+    node.attr("transform", d => `translate(${d.x},${d.y})`);
+    labels
+      .attr("x", d => d.x)
+      .attr("y", d => d.y);
+  });
+
+  // =====================================================
+  // INTERACTION
+  // =====================================================
+
+  let selectedNode = null;
+  let frozen = false;
+
+  // Hover tooltip
+  node.on("mouseenter", (event, d) => {
+    if (selectedNode) return;
+    tooltip.textContent = d.label;
+    tooltip.classList.add("visible");
+    highlightConnections(d);
+  }).on("mousemove", (event) => {
+    const rect = container.getBoundingClientRect();
+    tooltip.style.left = (event.clientX - rect.left + 12) + "px";
+    tooltip.style.top = (event.clientY - rect.top - 8) + "px";
+  }).on("mouseleave", () => {
+    tooltip.classList.remove("visible");
+    if (!selectedNode) resetHighlight();
+  });
+
+  // Click to select
+  node.on("click", (event, d) => {
+    event.stopPropagation();
+    selectNode(d);
+  });
+
+  // Keyboard: Enter to select, Escape to deselect
+  node.on("keydown", (event, d) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectNode(d);
+    }
+  });
+
+  svg.on("click", () => {
+    deselectNode();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      deselectNode();
+    }
+  });
+
+  function selectNode(d) {
+    selectedNode = d;
+    tooltip.classList.remove("visible");
+    highlightConnections(d);
+    showPanel(d);
+  }
+
+  function deselectNode() {
+    selectedNode = null;
+    resetHighlight();
+    panel.classList.remove("visible");
+  }
+
+  function highlightConnections(d) {
+    const connectedIds = new Set();
+    connectedIds.add(d.id);
+    simEdges.forEach(e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      if (sid === d.id) connectedIds.add(tid);
+      if (tid === d.id) connectedIds.add(sid);
+    });
+
+    node.select("circle")
+      .attr("opacity", n => connectedIds.has(n.id) ? 1 : 0.12)
+      .attr("stroke", n => n.id === d.id ? "#fff" : "#000")
+      .attr("stroke-width", n => n.id === d.id ? 3 : 1.5);
+
+    labels
+      .attr("fill", n => connectedIds.has(n.id) ? "#eee" : "#333")
+      .attr("font-weight", n => n.id === d.id ? 600 : 400)
+      .attr("font-size", n => n.id === d.id ? "13px" : "11px");
+
+    link
+      .attr("stroke-opacity", e => {
+        const sid = typeof e.source === "object" ? e.source.id : e.source;
+        const tid = typeof e.target === "object" ? e.target.id : e.target;
+        return (sid === d.id || tid === d.id) ? 0.8 : 0.04;
+      })
+      .attr("stroke-width", e => {
+        const sid = typeof e.source === "object" ? e.source.id : e.source;
+        const tid = typeof e.target === "object" ? e.target.id : e.target;
+        return (sid === d.id || tid === d.id) ? 2.5 : 1;
+      });
+  }
+
+  function resetHighlight() {
+    node.select("circle")
+      .attr("opacity", 0.85)
+      .attr("stroke", "#000")
+      .attr("stroke-width", 1.5);
+
+    labels
+      .attr("fill", "#bbb")
+      .attr("font-weight", 400)
+      .attr("font-size", "11px");
+
+    link
+      .attr("stroke-opacity", 0.3)
+      .attr("stroke-width", 1.5);
+  }
+
+  // Info panel
+  function showPanel(d) {
+    document.getElementById("panel-title").textContent = d.label;
+    const badge = document.getElementById("panel-badge");
+    badge.textContent = TYPE_LABELS[d.type];
+    badge.style.background = TYPE_COLORS[d.type];
+    badge.style.color = "#fff";
+    document.getElementById("panel-detail").textContent = d.detail;
+
+    const connList = document.getElementById("panel-connections");
+    connList.innerHTML = "";
+
+    const connections = [];
+    simEdges.forEach(e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      if (sid === d.id) {
+        const targetNode = simNodes.find(n => n.id === tid);
+        if (targetNode) connections.push({ node: targetNode, type: e.type, label: e.label, direction: "to" });
+      }
+      if (tid === d.id) {
+        const sourceNode = simNodes.find(n => n.id === sid);
+        if (sourceNode) connections.push({ node: sourceNode, type: e.type, label: e.label, direction: "from" });
+      }
+    });
+
+    connections.forEach(c => {
+      const li = document.createElement("li");
+      const arrow = c.direction === "to" ? "\u2192" : "\u2190";
+      li.innerHTML = `${arrow} <strong>${c.node.label}</strong> <span class="conn-type">${EDGE_LABELS[c.type]}${c.label ? ": " + c.label : ""}</span>`;
+      li.addEventListener("click", () => {
+        selectNode(c.node);
+      });
+      li.setAttribute("tabindex", "0");
+      li.setAttribute("role", "button");
+      li.setAttribute("aria-label", "Navigate to " + c.node.label);
+      li.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          selectNode(c.node);
+        }
+      });
+      connList.appendChild(li);
+    });
+
+    panel.classList.add("visible");
+  }
+
+  document.getElementById("panel-close").addEventListener("click", (e) => {
+    e.stopPropagation();
+    deselectNode();
+  });
+
+  // =====================================================
+  // SEARCH
+  // =====================================================
+
+  const searchInput = document.getElementById("search-input");
+
+  searchInput.addEventListener("input", () => {
+    const query = searchInput.value.toLowerCase().trim();
+    if (!query) {
+      resetHighlight();
+      resetFilter();
+      return;
+    }
+
+    const matchedIds = new Set();
+    simNodes.forEach(n => {
+      if (n.label.toLowerCase().includes(query) || n.detail.toLowerCase().includes(query) || n.type.toLowerCase().includes(query)) {
+        matchedIds.add(n.id);
+      }
+    });
+
+    // Also include connected nodes
+    const expandedIds = new Set(matchedIds);
+    simEdges.forEach(e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      if (matchedIds.has(sid)) expandedIds.add(tid);
+      if (matchedIds.has(tid)) expandedIds.add(sid);
+    });
+
+    node.select("circle")
+      .attr("opacity", n => matchedIds.has(n.id) ? 1 : expandedIds.has(n.id) ? 0.4 : 0.08)
+      .attr("stroke", n => matchedIds.has(n.id) ? "#fff" : "#000")
+      .attr("stroke-width", n => matchedIds.has(n.id) ? 2.5 : 1.5);
+
+    labels
+      .attr("fill", n => matchedIds.has(n.id) ? "#fff" : expandedIds.has(n.id) ? "#888" : "#222")
+      .attr("font-weight", n => matchedIds.has(n.id) ? 600 : 400);
+
+    link
+      .attr("stroke-opacity", e => {
+        const sid = typeof e.source === "object" ? e.source.id : e.source;
+        const tid = typeof e.target === "object" ? e.target.id : e.target;
+        return (matchedIds.has(sid) || matchedIds.has(tid)) ? 0.6 : 0.03;
+      });
+  });
+
+  // =====================================================
+  // FILTERS
+  // =====================================================
+
+  const filterBtns = document.querySelectorAll(".filter-btn");
+  let activeFilter = "all";
+
+  filterBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      filterBtns.forEach(b => { b.classList.remove("active"); b.setAttribute("aria-pressed", "false"); });
+      btn.classList.add("active");
+      btn.setAttribute("aria-pressed", "true");
+      activeFilter = btn.dataset.type;
+      applyFilter(activeFilter);
+    });
+  });
+
+  function applyFilter(type) {
+    if (type === "all") {
+      resetFilter();
+      return;
+    }
+
+    const matchedIds = new Set();
+    simNodes.forEach(n => {
+      if (n.type === type) matchedIds.add(n.id);
+    });
+
+    // Include neighbors
+    const expandedIds = new Set(matchedIds);
+    simEdges.forEach(e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      if (matchedIds.has(sid)) expandedIds.add(tid);
+      if (matchedIds.has(tid)) expandedIds.add(sid);
+    });
+
+    node.select("circle")
+      .attr("opacity", n => matchedIds.has(n.id) ? 1 : expandedIds.has(n.id) ? 0.3 : 0.06)
+      .attr("stroke", n => matchedIds.has(n.id) ? "#fff" : "#000")
+      .attr("stroke-width", n => matchedIds.has(n.id) ? 2.5 : 1.5);
+
+    labels
+      .attr("fill", n => matchedIds.has(n.id) ? "#fff" : expandedIds.has(n.id) ? "#666" : "#1a1a1a")
+      .attr("font-weight", n => matchedIds.has(n.id) ? 600 : 400);
+
+    link.attr("stroke-opacity", e => {
+      const sid = typeof e.source === "object" ? e.source.id : e.source;
+      const tid = typeof e.target === "object" ? e.target.id : e.target;
+      return (matchedIds.has(sid) && expandedIds.has(tid)) || (matchedIds.has(tid) && expandedIds.has(sid)) ? 0.6 : 0.02;
+    });
+  }
+
+  function resetFilter() {
+    if (!selectedNode) {
+      resetHighlight();
+    }
+  }
+
+  // =====================================================
+  // CONTROL BUTTONS
+  // =====================================================
+
+  document.getElementById("btn-reset").addEventListener("click", () => {
+    deselectNode();
+    searchInput.value = "";
+    filterBtns.forEach(b => { b.classList.remove("active"); b.setAttribute("aria-pressed", "false"); });
+    filterBtns[0].classList.add("active");
+    filterBtns[0].setAttribute("aria-pressed", "true");
+    activeFilter = "all";
+    resetHighlight();
+    svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+    if (frozen) {
+      frozen = false;
+      document.getElementById("btn-freeze").textContent = "Freeze";
+      simulation.alpha(0.3).restart();
+    }
+  });
+
+  document.getElementById("btn-freeze").addEventListener("click", () => {
+    frozen = !frozen;
+    if (frozen) {
+      simulation.stop();
+      document.getElementById("btn-freeze").textContent = "Unfreeze";
+    } else {
+      simulation.alpha(0.3).restart();
+      document.getElementById("btn-freeze").textContent = "Freeze";
+    }
+  });
+
+  // =====================================================
+  // DRAG
+  // =====================================================
+
+  function drag(simulation) {
+    function dragstarted(event, d) {
+      if (!event.active && !frozen) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+    }
+    function dragged(event, d) {
+      d.fx = event.x;
+      d.fy = event.y;
+    }
+    function dragended(event, d) {
+      if (!event.active && !frozen) simulation.alphaTarget(0);
+      if (!frozen) {
+        d.fx = null;
+        d.fy = null;
+      }
+    }
+    return d3.drag()
+      .on("start", dragstarted)
+      .on("drag", dragged)
+      .on("end", dragended);
+  }
+
+  // =====================================================
+  // RESIZE
+  // =====================================================
+
+  window.addEventListener("resize", () => {
+    width = container.clientWidth;
+    height = container.clientHeight;
+    svg.attr("viewBox", [0, 0, width, height]);
+    simulation.force("center", d3.forceCenter(width / 2, height / 2));
+    simulation.force("x", d3.forceX(width / 2).strength(0.03));
+    simulation.force("y", d3.forceY(height / 2).strength(0.03));
+    if (!frozen) simulation.alpha(0.1).restart();
+  });
+
+})();
+</script>
+
+</body>
+</html>
