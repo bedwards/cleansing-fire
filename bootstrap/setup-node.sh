@@ -221,36 +221,36 @@ else
 fi
 
 # ============================================================================
-# Phase 6: Configure autonomous scheduler
+# Phase 6: Start autonomous scheduler
 # ============================================================================
 
 log ""
 log "=== Phase 6: Autonomous Scheduler ==="
 
-SCHEDULE_FILE="$FIRE_CONFIG/autonomous-schedule.json"
-cat > "$SCHEDULE_FILE" << 'SCHEDEOF'
-{
-  "node_id": "auto",
-  "schedule": [
-    {"interval": "15m", "task": "news-scan", "command": "echo '{\"action\":\"trending\"}' | plugins/news-monitor"},
-    {"interval": "1h", "task": "issue-check", "command": "gh issue list --assignee=@me --state=open --json number,title"},
-    {"interval": "4h", "task": "investigate", "command": "scripts/investigate.sh --random"},
-    {"interval": "12h", "task": "forge-content", "command": "scripts/generate-content.sh"},
-    {"interval": "24h", "task": "deep-research", "command": "claude -p 'Research a trending power-related topic. Use the /research skill. Introduce chaos.'"},
-    {"interval": "24h", "task": "self-update", "command": "git pull --rebase && scripts/verify-integrity.sh"},
-    {"interval": "7d", "task": "weekly-report", "command": "claude -p 'Generate a weekly power shift report from all investigations and intelligence.'"}
-  ],
-  "triggers": [
-    {"event": "new-legislation", "source": "civic-legiscan", "action": "analyze-and-distribute"},
-    {"event": "sec-filing", "source": "corp-sec", "action": "investigate-entity"},
-    {"event": "pr-campaign-detected", "source": "narrative-detector", "action": "counter-narrative"},
-    {"event": "peer-intelligence", "source": "firewire", "action": "cross-reference"},
-    {"event": "github-issue-assigned", "source": "github", "action": "implement"},
-    {"event": "human-query", "source": "claude-cli", "action": "respond"}
-  ]
-}
-SCHEDEOF
-log "Autonomous schedule configured: $SCHEDULE_FILE"
+# The scheduler tasks are defined in scheduler/tasks.json (25 tasks across
+# the SENSE -> ANALYZE -> CREATE -> DISTRIBUTE -> IMPROVE -> REPEAT cycle).
+# Start the scheduler daemon which manages the full autonomous loop.
+
+if [ -f "$FIRE_HOME/scripts/scheduler-ctl.sh" ]; then
+    log "Starting scheduler daemon..."
+    bash "$FIRE_HOME/scripts/scheduler-ctl.sh" start 2>>"$LOG" && \
+        log "Scheduler: started (status API on port 7802)" || \
+        warn "Scheduler: failed to start"
+else
+    warn "scheduler-ctl.sh not found — scheduler must be started manually"
+fi
+
+# Show configured task count
+TASK_COUNT=$(python3 -c "
+import json
+with open('$FIRE_HOME/scheduler/tasks.json') as f:
+    d = json.load(f)
+enabled = [t for t in d.get('scheduled_tasks', []) if t.get('enabled', True)]
+print(len(enabled))
+" 2>/dev/null || echo "?")
+log "Autonomous tasks: $TASK_COUNT enabled"
+log "Categories: sense, analyze, create, distribute, improve, system"
+log "Control: scripts/scheduler-ctl.sh status|tasks|results|reload"
 
 # ============================================================================
 # Phase 7: Cloudflare deployment (if wrangler available)
@@ -294,7 +294,9 @@ log ""
 log "Node ID:        $(cat "$NODE_ID_FILE" 2>/dev/null || echo 'generated')"
 log "Home:           $FIRE_HOME"
 log "Config:         $FIRE_CONFIG"
-log "Gatekeeper:     $(curl -sf http://127.0.0.1:7800/health >/dev/null 2>&1 && echo 'running' || echo 'not running')"
+log "Gatekeeper:     $(curl -sf http://127.0.0.1:7800/health >/dev/null 2>&1 && echo 'running on :7800' || echo 'not running')"
+log "Scheduler:      $(curl -sf http://127.0.0.1:7802/health >/dev/null 2>&1 && echo 'running on :7802' || echo 'not running')"
+log "FireWire:       $(curl -sf http://127.0.0.1:7801/health >/dev/null 2>&1 && echo 'running on :7801' || echo 'not running')"
 log "Ollama:         $(command -v ollama >/dev/null 2>&1 && echo 'available' || echo 'not installed')"
 log "Wrangler:       $(command -v wrangler >/dev/null 2>&1 && echo 'available' || echo 'not installed')"
 log "GitHub CLI:     $(command -v gh >/dev/null 2>&1 && echo 'available' || echo 'not installed')"
@@ -302,10 +304,12 @@ log ""
 log "Docs:           $(ls "$FIRE_HOME"/docs/*.md 2>/dev/null | wc -l | tr -d ' ') research documents"
 log "Plugins:        $(ls "$FIRE_HOME"/plugins/* 2>/dev/null | wc -l | tr -d ' ') plugins"
 log "Investigations: $(ls "$FIRE_HOME"/investigations/*.md 2>/dev/null | grep -v README | wc -l | tr -d ' ') templates"
+log "Tasks:          $TASK_COUNT autonomous tasks enabled"
 log ""
 log "To interact:    cd $FIRE_HOME && claude"
 log "To investigate:  claude -p '/investigate [entity name]'"
-log "To check status: scripts/node-status.sh"
+log "Scheduler:      scripts/scheduler-ctl.sh status"
+log "Node status:    scripts/node-status.sh"
 log ""
 log "The fire is lit. This node is operational."
 log "Ignis purgat. Luciditas liberat."
