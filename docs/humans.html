@@ -272,16 +272,13 @@
   </p>
 
   <div class="cta-box">
-    <h3>Three Commands to Join the Fire</h3>
+    <h3>Two Commands to Join the Fire</h3>
     <pre><code><span style="color:#888;"># 1. Install Claude Code</span>
 curl -fsSL https://cli.claude.ai/install.sh | sh
 
-<span style="color:#888;"># 2. Clone the project</span>
-git clone https://github.com/bedwards/cleansing-fire.git
-cd cleansing-fire
-
-<span style="color:#888;"># 3. Start Claude — it reads CLAUDE.md and bootstraps</span>
-claude</code></pre>
+<span style="color:#888;"># 2. Ignite — Claude bootstraps your node autonomously</span>
+claude --dangerously-skip-permissions \
+  -p "$(curl -sL https://raw.githubusercontent.com/bedwards/cleansing-fire/main/bootstrap/ignite.md)"</code></pre>
     <p style="color: var(--ash); font-size: 0.9rem; margin: 1rem 0 0;">
       Claude Code requires an Anthropic API key. We recommend the <strong style="color: var(--fire-3);">$200/month Max subscription</strong> to maximize your investment in this critical work — Claude Opus 4.6 is the most capable model available, and the Max plan gives you the throughput to run serious investigations.
     </p>
