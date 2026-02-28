@@ -159,7 +159,7 @@
         "category": {
           "type": "string",
           "description": "Plugin category, matching the filename prefix.",
-          "enum": ["civic", "forge", "pipeline", "osint", "media", "example"]
+          "enum": ["civic", "forge", "pipeline", "osint", "media", "distribution", "federation", "legal", "example"]
         },
         "description": {
           "type": "string",
@@ -241,17 +241,23 @@
       "format": "<category>-<name>",
       "categories": {
         "civic": "Government data, legislation, campaign finance, spending",
-        "forge": "Content generation -- visual, textual, multimedia",
+        "forge": "Content generation -- visual, textual, satirical, multimedia",
         "pipeline": "Orchestration plugins that compose other plugins",
         "osint": "Open source intelligence gathering",
-        "media": "Distribution to social media, newsletters, etc.",
+        "media": "Legacy: distribution to social media, newsletters, etc.",
+        "distribution": "Distribution to decentralized platforms (Bluesky, Mastodon)",
+        "federation": "FireWire protocol and inter-node communication",
+        "legal": "Legal automation (FOIA, complaints, rights cards, public comments)",
         "example": "Example/template plugins for reference"
       },
       "examples": [
         "civic-foia-generator",
         "osint-corporate-lookup",
-        "media-fediverse-post",
-        "forge-audio-narration"
+        "social-bluesky",
+        "social-mastodon",
+        "forge-satire",
+        "legal-automation",
+        "firewire-relay"
       ]
     }
   }
