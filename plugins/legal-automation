@@ -759,43 +759,28 @@ def _rights_card_fallback(scenario_info, state):
     """Generate a basic rights card without AI assistance."""
     amendments = "\n".join(f"  - {a}" for a in scenario_info["primary_amendments"])
     statutes = "\n".join(f"  - {s}" for s in scenario_info["key_statutes"])
-
-    return f"""{scenario_info['title'].upper()}
-{"=" * len(scenario_info['title'])}
-
-CONSTITUTIONAL PROTECTIONS:
-{amendments}
-
-KEY LEGAL AUTHORITIES:
-{statutes}
-
-YOUR CORE RIGHTS:
-1. You have the right to remain silent. Use it.
-2. You have the right to an attorney. Request one clearly.
-3. You have the right to refuse consent to searches.
-4. You have the right to record public officials in public spaces.
-5. You have the right to know why you are being detained.
-
-KEY PHRASES TO REMEMBER:
-- "I am exercising my right to remain silent."
-- "I do not consent to this search."
-- "Am I free to go, or am I being detained?"
-- "I want to speak to a lawyer."
-
-IF YOUR RIGHTS ARE VIOLATED:
-1. Stay calm. Do not physically resist.
-2. Document everything: names, badge numbers, time, location, witnesses.
-3. Write down details as soon as possible.
-4. Contact the ACLU or a civil rights attorney.
-5. File a complaint with the relevant oversight body.
-
-{f"State: {state} -- Consult a local attorney for state-specific protections." if state else ""}
-
-EMERGENCY CONTACTS:
-- ACLU: aclu.org
-- National Lawyers Guild: nlg.org
-- Your attorney: [fill in]
-- Emergency contact: [fill in]"""
+    state_line = f"\nState: {state} -- Consult a local attorney for state-specific protections.\n" if state else ""
+    return (
+        f"{scenario_info['title'].upper()}\n\nCONSTITUTIONAL PROTECTIONS:\n{amendments}\n\n"
+        f"KEY LEGAL AUTHORITIES:\n{statutes}\n\n"
+        "YOUR CORE RIGHTS:\n"
+        "1. You have the right to remain silent. Use it.\n"
+        "2. You have the right to an attorney. Request one clearly.\n"
+        "3. You have the right to refuse consent to searches.\n"
+        "4. You have the right to record public officials in public spaces.\n"
+        "5. You have the right to know why you are being detained.\n\n"
+        "KEY PHRASES:\n"
+        '- "I am exercising my right to remain silent."\n'
+        '- "I do not consent to this search."\n'
+        '- "Am I free to go, or am I being detained?"\n'
+        '- "I want to speak to a lawyer."\n\n'
+        "IF YOUR RIGHTS ARE VIOLATED:\n"
+        "1. Stay calm. Do not physically resist.\n"
+        "2. Document everything: names, badge numbers, time, location, witnesses.\n"
+        "3. Contact the ACLU or a civil rights attorney.\n"
+        f"{state_line}\nEMERGENCY CONTACTS:\n- ACLU: aclu.org\n"
+        "- National Lawyers Guild: nlg.org\n- Your attorney: [fill in]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -904,45 +889,18 @@ def _threat_response_fallback(defense_info, original_excerpt, our_position):
     today = datetime.now(timezone.utc).strftime("%B %d, %Y")
     defenses = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(defense_info["primary_defenses"]))
     statutes = "\n".join(f"  - {s}" for s in defense_info["key_statutes"])
-
-    return f"""[YOUR NAME / ORGANIZATION]
-[YOUR ADDRESS]
-[YOUR EMAIL]
-
-{today}
-
-VIA [EMAIL/CERTIFIED MAIL]
-
-[SENDER'S NAME]
-[SENDER'S ADDRESS]
-
-Re: Response to Your {defense_info['name']} Communication
-
-Dear [SENDER'S NAME]:
-
-I am in receipt of your communication dated [DATE OF THREAT] regarding [BRIEF DESCRIPTION].
-
-{f"Our position is as follows: {our_position}" if our_position else "I write to respond to the claims raised in your communication."}
-
-LEGAL ANALYSIS
-
-The claims raised in your communication are without merit for the following reasons:
-
-{defenses}
-
-The applicable legal authorities support our position:
-
-{statutes}
-
-CONCLUSION
-
-For the reasons set forth above, the claims in your communication lack legal merit. All rights, remedies, and defenses are expressly reserved, including but not limited to any claims under applicable anti-SLAPP statutes.
-
-This letter constitutes a preliminary response. I am consulting with legal counsel regarding this matter and reserve the right to supplement this response.
-
-Sincerely,
-
-[YOUR NAME]"""
+    pos = f"Our position: {our_position}" if our_position else "I write to respond to your claims."
+    return (
+        f"[YOUR NAME / ORGANIZATION]\n[YOUR ADDRESS]\n[YOUR EMAIL]\n\n{today}\n\n"
+        f"VIA [EMAIL/CERTIFIED MAIL]\n\n[SENDER'S NAME]\n[SENDER'S ADDRESS]\n\n"
+        f"Re: Response to Your {defense_info['name']} Communication\n\n"
+        f"Dear [SENDER'S NAME]:\n\nI am in receipt of your communication dated "
+        f"[DATE] regarding [DESCRIPTION].\n\n{pos}\n\n"
+        f"LEGAL ANALYSIS\n\nThe claims are without merit:\n\n{defenses}\n\n"
+        f"Applicable authorities:\n{statutes}\n\n"
+        f"All rights, remedies, and defenses are reserved, including anti-SLAPP claims. "
+        f"I am consulting with legal counsel.\n\nSincerely,\n\n[YOUR NAME]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1050,44 +1008,19 @@ Generate ONLY the public comment text."""
 def _public_comment_fallback(docket, agency, position, facts_str):
     """Generate a basic public comment without AI assistance."""
     today = datetime.now(timezone.utc).strftime("%B %d, %Y")
-
-    return f"""[YOUR NAME / ORGANIZATION]
-Comments on Docket No. {docket}
-{agency}
-{today}
-
-Re: Docket No. {docket}
-
-Dear Sir or Madam:
-
-I respectfully submit these comments in response to the above-referenced proceeding pursuant to the notice-and-comment requirements of the Administrative Procedure Act, 5 U.S.C. Section 553.
-
-POSITION
-
-{position}
-
-FACTUAL BASIS
-
-{facts_str}
-
-LEGAL AND POLICY CONSIDERATIONS
-
-The agency is required under the Administrative Procedure Act to consider all relevant factors and articulate a rational connection between the facts found and the choice made. Motor Vehicle Mfrs. Ass'n v. State Farm Mut. Auto. Ins. Co., 463 U.S. 29, 43 (1983).
-
-Agency action that is "arbitrary, capricious, an abuse of discretion, or otherwise not in accordance with law" is subject to judicial review under 5 U.S.C. Section 706(2)(A).
-
-CONCLUSION
-
-For the foregoing reasons, I respectfully request that the agency [take the action consistent with the position stated above].
-
-I am available to provide additional information upon request.
-
-Respectfully submitted,
-
-[YOUR NAME]
-[YOUR AFFILIATION, IF ANY]
-[YOUR ADDRESS]
-[YOUR EMAIL]"""
+    return (
+        f"[YOUR NAME / ORGANIZATION]\nComments on Docket No. {docket}\n"
+        f"{agency}\n{today}\n\nRe: Docket No. {docket}\n\n"
+        f"Dear Sir or Madam:\n\nI submit these comments pursuant to the "
+        f"Administrative Procedure Act, 5 U.S.C. Section 553.\n\n"
+        f"POSITION\n\n{position}\n\nFACTUAL BASIS\n\n{facts_str}\n\n"
+        f"LEGAL CONSIDERATIONS\n\nThe agency must consider all relevant "
+        f"factors and articulate a rational connection between facts and "
+        f"choices. Motor Vehicle Mfrs. Ass'n v. State Farm, 463 U.S. 29 (1983). "
+        f"Arbitrary and capricious action is reviewable under 5 U.S.C. "
+        f"Section 706(2)(A).\n\nRespectfully submitted,\n\n"
+        f"[YOUR NAME]\n[YOUR AFFILIATION]\n[YOUR EMAIL]"
+    )
 
 
 # ---------------------------------------------------------------------------

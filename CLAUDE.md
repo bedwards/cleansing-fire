@@ -36,18 +36,19 @@ Claude Code CLI is the human interface to this system. Humans learn to use Claud
 - **CLI Client** (`bin/fire-ask`) - Command-line interface to gatekeeper
 - **Encrypted Messaging** (`bin/fire-message`, 823 lines) - Node-to-node encrypted messaging CLI. Ed25519 signing, AES-256-CBC encryption, send/inbox/read/peers/broadcast/threads. Relays via FireWire.
 - **Worker Orchestrator** (`workers/orchestrator.sh`) - Launches Claude Code workers in git worktrees
-- **Plugin System** (`plugins/`, 17 plugins) - Executable scripts that accept JSON stdin, produce JSON stdout
+- **Plugin System** (`plugins/`, 19 plugins) - Executable scripts that accept JSON stdin, produce JSON stdout
 
 ### Intelligence & Exposure
 - **OSINT Pipeline** - Automated open-source intelligence collection
 - **Corporate Power Mapping** - SEC EDGAR, OpenCorporates, LittleSis, beneficial ownership chains
 - **Civic Data Pipeline** - LegiScan, FEC, USAspending, cross-referencing corruption detector
 - **Whistleblower Infrastructure** - SecureDrop-style secure submission (planned)
+- **Legal Automation** (`plugins/legal-automation`, 1222 lines) - FOIA generator, regulatory complaints (FTC/FCC/SEC/EPA/CFPB), know-your-rights cards, cease-and-desist responses, public comments
 
 ### The Forge (Content Generation)
 - **forge-vision** - SVG visualizations, ASCII art, Mermaid diagrams, image prompts
 - **forge-voice** - Social posts, threads, newsletters, poetry, agitprop, satire
-- **Satire Engine** - Parody generator, corporate doublespeak translator, meme generation
+- **forge-satire** (889 lines) - Satirize (doublespeak translator), meme-text, parody (press release/memo/FAQ), headline (Onion/Borowitz style), roast (data-driven)
 - **pipeline-data-to-fire** - Full pipeline: data → analysis → visualization → narrative → distribution
 
 ### Dual Documentation
