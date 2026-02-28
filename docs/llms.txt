@@ -27,6 +27,10 @@
 - [Fork Protection](https://bedwards.github.io/cleansing-fire/fork-protection.md): Integrity preservation across forks
 - [Dual Documentation](https://bedwards.github.io/cleansing-fire/dual-documentation.md): Human + AI documentation architecture
 
+## Security & Resilience
+
+- [Adversarial Resilience](https://bedwards.github.io/cleansing-fire/adversarial-resilience.md): War manual for civic tech -- threat modeling (state actors, corporate legal, Sybil attacks), real-world takedown case studies (Sci-Hub, Pirate Bay, WikiLeaks, Signal, Tor), anti-fragile network design, operational security, incident response
+
 ## Strategy & Theory
 
 - [Game Theory](https://bedwards.github.io/cleansing-fire/game-theory.md): Strategic interaction models for power dynamics
