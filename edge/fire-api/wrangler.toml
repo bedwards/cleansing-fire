@@ -32,12 +32,12 @@ compatibility_date = "2026-02-24"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespace create CACHE
+id = "d251283c91604bfd871189fcc92ec06f"
 # preview_id = "REPLACE_FOR_DEV"          # Create via: npx wrangler kv namespace create CACHE --preview
 
 [[kv_namespaces]]
 binding = "CONFIG"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespace create CONFIG
+id = "ba41b41155b7461cb8f47e20905d6880"
 
 # -----------------------------------------------------------------------------
 # D1 Database
@@ -53,7 +53,7 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespac
 [[d1_databases]]
 binding = "CIVIC_DB"
 database_name = "civic-data"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"   # Create via: npx wrangler d1 create civic-data
+database_id = "b7eb088d-67a8-42cf-b79c-ef58419b21e0"
 
 # -----------------------------------------------------------------------------
 # R2 Bucket

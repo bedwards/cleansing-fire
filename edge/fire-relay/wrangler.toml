@@ -26,7 +26,7 @@ compatibility_date = "2026-02-24"
 
 [[kv_namespaces]]
 binding = "NODES"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespace create NODES
+id = "4d3fc279403b4c8c8222a11d0ca63008"
 
 # -----------------------------------------------------------------------------
 # KV Namespace — Relay Configuration
@@ -36,7 +36,7 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespac
 
 [[kv_namespaces]]
 binding = "CONFIG"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespace create RELAY_CONFIG
+id = "a4417a9f84df4cc0904ab0ff950b9ff6"
 
 # -----------------------------------------------------------------------------
 # D1 Database — Federation Log
@@ -48,7 +48,7 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespac
 [[d1_databases]]
 binding = "RELAY_DB"
 database_name = "fire-relay"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"   # Create via: npx wrangler d1 create fire-relay
+database_id = "a032bc72-1bab-41c8-a9b7-52492124ca02"
 
 # -----------------------------------------------------------------------------
 # Service Binding to fire-ai for optional AI verification
