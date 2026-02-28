@@ -247,6 +247,28 @@ Separate from GitHub Pages — these handle compute, API, and AI inference at th
 - `docs/getting-started.md` - Human onboarding guide
 - `docs/claude-code-tutorial.md` - CLI tutorial for beginners
 
+## Full-Stack Decentralization Principle
+
+**All levels of this system must be decentralized, have options, redundancies.** No single provider dependency at any layer:
+
+- **Git hosting**: Not just GitHub. Support self-hosted alternatives (Gitea, Forgejo, Codeberg) on any cloud. The bootstrap must work from any git remote.
+- **Edge compute**: Not just Cloudflare. Support alternative edge/serverless platforms (Deno Deploy, Fly.io, self-hosted).
+- **AI inference**: Not just Ollama or Claude. Support multiple local and cloud LLM providers.
+- **Social distribution**: Not just Bluesky/Mastodon. Support any decentralized platform.
+- **Every layer**: Evaluate for single-provider risk. Provide alternatives and fallbacks.
+
+### Bootstrap Interaction Model
+The bootstrap process must be **interactive and adaptive**:
+1. Human installs Claude Code CLI and runs with `--dangerously-skip-permissions`
+2. Claude installs all prerequisites and **verifies** them
+3. Claude **asks the human** about preferred deployment choices (local vs cloud, which providers)
+4. Claude gives **precise, narrow-scope instructions** for things it can't do itself (e.g., "authenticate wrangler")
+5. Claude uses **web search AND package managers** for latest versions — never hardcode CLI args
+6. Claude uses `-h`/`--help` to discover current tool interfaces
+7. System becomes fully autonomous after setup
+
+This is a **long-lived system** that must adapt to changes in external tools and APIs.
+
 ## Coherence Principle
 
 **Never bolt on. Always integrate.** Before adding anything new, read the existing work it connects to. We value what we've built — never destroy, never regress. Add in a fashion that keeps the whole project coherent. Cross-reference. Interweave. Every addition should strengthen the existing structure, not just sit beside it.
