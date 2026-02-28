@@ -343,10 +343,11 @@ bin/fire-ask --sync <span class="str">"Analyze this document for power concentra
 
   <h3>Edge Stack (Cloudflare Workers)</h3>
   <pre><span class="comment"># Separate from GitHub Pages — these are API and compute workers</span>
-<span class="key">fire-api</span>     <span class="comment"># REST API for investigations, queries</span>
-<span class="key">fire-ai</span>      <span class="comment"># Workers AI inference (Llama, Whisper, embeddings)</span>
-<span class="key">fire-search</span>  <span class="comment"># Vectorize-powered semantic search</span>
-<span class="key">fire-relay</span>   <span class="comment"># Federation protocol relay</span>
+<span class="key">fire-api</span>      <span class="comment"># REST API for investigations, queries</span>
+<span class="key">fire-ai</span>       <span class="comment"># Workers AI inference (Llama, Whisper, embeddings)</span>
+<span class="key">fire-markdown</span> <span class="comment"># LLM-accessible markdown proxy (Accept: text/markdown)</span>
+<span class="key">fire-search</span>   <span class="comment"># Vectorize-powered semantic search</span>
+<span class="key">fire-relay</span>    <span class="comment"># Federation protocol relay</span>
 
 <span class="comment"># Deployed via GitHub Actions → wrangler</span>
 <span class="comment"># See .github/workflows/deploy-workers.yml</span></pre>
@@ -416,6 +417,138 @@ scripts/verify-integrity.sh
 <span class="comment"># For CI/CD (no color output)</span>
 scripts/verify-integrity.sh --ci</pre>
   <p><a href="fork-protection.md">Full fork protection documentation &rarr;</a></p>
+</section>
+
+<section id="workflow" aria-labelledby="workflow-h">
+  <h2 id="workflow-h">Development Workflow</h2>
+  <p>All work flows through this cycle. No exceptions.</p>
+  <div class="protocol-box">
+    <h4>The Definitive Development Loop</h4>
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>GitHub Issue</strong> — every piece of work starts as an issue with labels</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Implementation Worker</strong> — Claude Opus 4.6, git worktree, feature branch <code>cf/&lt;issue&gt;-&lt;desc&gt;</code>, creates PR</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Review Worker</strong> — separate Opus 4.6 instance, own worktree. Reviews PR. <strong>NEVER fixes code.</strong></div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Fix Worker</strong> — if review finds issues, a separate worker reads comments and fixes. Iterate until green.</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Orchestrator merges</strong> — resolves conflicts, verifies main branch and deployments are green.</div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-text"><strong>Close the issue.</strong></div></div>
+  </div>
+  <pre><span class="comment"># Key rules</span>
+<span class="key">Workers</span>:     Always Claude Opus 4.6, always git worktrees
+<span class="key">Review</span>:      NEVER fixes code — only reviews
+<span class="key">Fix</span>:         Separate from implementation and review
+<span class="key">Merge</span>:       Only the orchestrator merges
+<span class="key">Verify</span>:      GitHub Pages + Cloudflare Workers must be green</pre>
+</section>
+
+<section id="docs-index" aria-labelledby="docs-h">
+  <h2 id="docs-h">Research Library Index</h2>
+  <p>21 research documents spanning philosophy, economics, technology, intelligence, and strategy. All in <code>docs/</code>.</p>
+  <div class="spec-grid">
+    <a href="economics.md" class="spec-card">
+      <span class="format fmt-md">Research</span>
+      <h4>The Ember Economy</h4>
+      <p>Demurrage currency, commons protocol, production mesh, structural redistribution. 1,675 lines.</p>
+    </a>
+    <a href="federation-protocol.md" class="spec-card">
+      <span class="format fmt-md">Protocol</span>
+      <h4>FireWire Protocol</h4>
+      <p>Federation without central authority. Signed logs, gossip propagation, trust decay. 1,829 lines.</p>
+    </a>
+    <a href="intelligence-and-osint.md" class="spec-card">
+      <span class="format fmt-md">Research</span>
+      <h4>Intelligence &amp; OSINT</h4>
+      <p>Bellingcat methods, SEC EDGAR, OpenCorporates, FOIA automation, whistleblower infrastructure. 1,803 lines.</p>
+    </a>
+    <a href="corporate-power-map.md" class="spec-card">
+      <span class="format fmt-md">Research</span>
+      <h4>Corporate Power Map</h4>
+      <p>Private equity, tech platforms, dark money networks, media conglomerates. 25+ data sources.</p>
+    </a>
+    <a href="global-architecture.md" class="spec-card">
+      <span class="format fmt-md">Technical</span>
+      <h4>Global Architecture</h4>
+      <p>Cloudflare edge infrastructure, planetary-scale deployment, cost analysis. 2,491 lines.</p>
+    </a>
+    <a href="game-theory.md" class="spec-card">
+      <span class="format fmt-md">Research</span>
+      <h4>Game Theory</h4>
+      <p>Decay functions, trust calculus, anti-capture mechanisms, quadratic voting/funding.</p>
+    </a>
+    <a href="humor-and-satire.md" class="spec-card">
+      <span class="format fmt-md">Creative</span>
+      <h4>Humor &amp; Satire</h4>
+      <p>Satire engine, corporate doublespeak translator, meme generation, historical satire analysis.</p>
+    </a>
+    <a href="decentralized-systems.md" class="spec-card">
+      <span class="format fmt-md">Research</span>
+      <h4>Decentralized Systems</h4>
+      <p>TCP/IP, biological networks, governance systems, emergent coordination patterns.</p>
+    </a>
+    <a href="blue-sky-vision.md" class="spec-card">
+      <span class="format fmt-md">Vision</span>
+      <h4>Blue Sky Vision</h4>
+      <p>10-year aspirational roadmap. Convergent capabilities. Scenarios. Honest accounting of costs.</p>
+    </a>
+    <a href="future-capabilities.md" class="spec-card">
+      <span class="format fmt-md">Research</span>
+      <h4>Future Capabilities</h4>
+      <p>AI/networking/computing futures, the $50 civic AI agent, emerging technology landscape.</p>
+    </a>
+    <a href="art-and-media.md" class="spec-card">
+      <span class="format fmt-md">Creative</span>
+      <h4>Art &amp; Media</h4>
+      <p>Revolutionary art theory, media theory, the Cleansing Fire aesthetic, visual identity.</p>
+    </a>
+    <a href="literary-arsenal.md" class="spec-card">
+      <span class="format fmt-md">Creative</span>
+      <h4>Literary Arsenal</h4>
+      <p>Mottos, poems, manifestos, songs, spoken word. Creative ammunition for the movement.</p>
+    </a>
+    <a href="historical-research.md" class="spec-card">
+      <span class="format fmt-md">Research</span>
+      <h4>Historical Research</h4>
+      <p>Power concentration patterns across history, movement strategies, what worked and what didn't.</p>
+    </a>
+    <a href="technology-research.md" class="spec-card">
+      <span class="format fmt-md">Technical</span>
+      <h4>Technology Research</h4>
+      <p>Current technology landscape, tools for civic engagement, surveillance countermeasures.</p>
+    </a>
+    <a href="claude-code-features.md" class="spec-card">
+      <span class="format fmt-md">Technical</span>
+      <h4>Claude Code CLI Features</h4>
+      <p>Full feature inventory, hooks, skills, subagents, agent teams, cost optimization. 1,322 lines.</p>
+    </a>
+    <a href="cloudflare-implementation.md" class="spec-card">
+      <span class="format fmt-md">Technical</span>
+      <h4>Cloudflare Implementation</h4>
+      <p>5 worker projects, data flow diagrams, cost analysis, 5-phase rollout plan.</p>
+    </a>
+    <a href="dual-documentation.md" class="spec-card">
+      <span class="format fmt-md">Technical</span>
+      <h4>Dual Documentation</h4>
+      <p>Human docs (GitHub Pages) + machine specs (YAML/JSON). Architecture for two audiences.</p>
+    </a>
+    <a href="fork-protection.md" class="spec-card">
+      <span class="format fmt-md">Technical</span>
+      <h4>Fork Protection</h4>
+      <p>Threat model, integrity verification, web of trust, constitutional anchors.</p>
+    </a>
+    <a href="multimedia-tools.md" class="spec-card">
+      <span class="format fmt-md">Technical</span>
+      <h4>Multimedia Tools</h4>
+      <p>SVG generation, TTS, video tools, content distribution pipelines.</p>
+    </a>
+    <a href="getting-started.md" class="spec-card">
+      <span class="format fmt-md">Tutorial</span>
+      <h4>Getting Started</h4>
+      <p>Human onboarding guide. First steps into the Cleansing Fire ecosystem.</p>
+    </a>
+    <a href="claude-code-tutorial.md" class="spec-card">
+      <span class="format fmt-md">Tutorial</span>
+      <h4>Claude Code Tutorial</h4>
+      <p>Step-by-step Claude Code CLI guide for beginners. Your interface to the system.</p>
+    </a>
+  </div>
 </section>
 
 <div class="cta-box">
