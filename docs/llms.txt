@@ -27,6 +27,7 @@
 - [Game Theory](https://bedwards.github.io/cleansing-fire/game-theory.md): Strategic interaction models for power dynamics
 - [Future Capabilities](https://bedwards.github.io/cleansing-fire/future-capabilities.md): Roadmap and planned features
 - [Blue Sky Vision](https://bedwards.github.io/cleansing-fire/blue-sky-vision.md): Long-term aspirational goals
+- [Chaos Research](https://bedwards.github.io/cleansing-fire/chaos-research.md): Serendipity methodology, random research angles, emergent patterns
 
 ## Optional
 
