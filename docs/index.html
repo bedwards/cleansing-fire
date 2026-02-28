@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cleansing Fire — Pyrrhic Lucidity</title>
+<meta name="description" content="A philosophy of contested liberation for the age of systemic capture. See clearly. Act anyway. Bear the cost.">
+<style>
+  :root {
+    --fire-1: #ff4400;
+    --fire-2: #ff8800;
+    --fire-3: #ffcc00;
+    --ember: #331100;
+    --ash: #888;
+    --smoke: #333;
+    --night: #0a0a0a;
+    --bone: #eee;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--night);
+    color: var(--bone);
+    font-family: 'Georgia', 'Times New Roman', serif;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* Fire animation */
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+  }
+  @keyframes rise {
+    0% { transform: translateY(0) scale(1); opacity: 0.7; }
+    100% { transform: translateY(-100vh) scale(0.3); opacity: 0; }
+  }
+
+  .ember-field {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0; overflow: hidden;
+  }
+  .ember {
+    position: absolute; bottom: -10px;
+    width: 3px; height: 3px; border-radius: 50%;
+    background: var(--fire-2);
+    animation: rise linear infinite;
+  }
+
+  /* Layout */
+  .content { position: relative; z-index: 1; max-width: 800px; margin: 0 auto; padding: 2rem; }
+
+  /* Hero */
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; text-align: center;
+    padding: 2rem;
+  }
+  .hero h1 {
+    font-size: clamp(2.5rem, 8vw, 5rem);
+    font-weight: 300; letter-spacing: 0.3em; text-transform: uppercase;
+    background: linear-gradient(180deg, var(--fire-3), var(--fire-1));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: flicker 3s ease-in-out infinite;
+  }
+  .hero .subtitle {
+    font-size: clamp(0.9rem, 2.5vw, 1.2rem);
+    color: var(--ash); margin-top: 1rem;
+    font-style: italic; letter-spacing: 0.1em;
+  }
+  .hero .epigraph {
+    max-width: 600px; margin: 3rem auto; padding: 2rem;
+    border-left: 2px solid var(--fire-1); color: var(--ash);
+    font-size: 1rem;
+  }
+
+  /* Sections */
+  section { padding: 4rem 0; border-top: 1px solid #222; }
+  h2 {
+    font-size: 1.8rem; font-weight: 300; letter-spacing: 0.15em;
+    color: var(--fire-2); margin-bottom: 2rem; text-transform: uppercase;
+  }
+  h3 { color: var(--fire-3); font-size: 1.1rem; margin: 2rem 0 0.5rem; font-weight: 600; }
+  p { margin-bottom: 1.2rem; color: #ccc; }
+  strong { color: var(--fire-3); font-weight: 600; }
+  a { color: var(--fire-2); text-decoration: none; border-bottom: 1px solid var(--fire-1); }
+  a:hover { color: var(--fire-3); }
+
+  /* Principles */
+  .principle {
+    padding: 1.5rem; margin: 1rem 0;
+    border-left: 3px solid var(--fire-1);
+    background: rgba(255, 68, 0, 0.03);
+  }
+  .principle-number {
+    font-size: 0.8rem; color: var(--fire-1);
+    letter-spacing: 0.2em; text-transform: uppercase;
+  }
+  .principle-name { font-size: 1.2rem; color: var(--fire-3); margin: 0.3rem 0; }
+  .principle-text { color: var(--ash); font-size: 0.95rem; }
+
+  /* Grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin: 2rem 0; }
+  .card {
+    padding: 1.5rem; background: #111; border: 1px solid #222;
+    transition: border-color 0.3s;
+  }
+  .card:hover { border-color: var(--fire-1); }
+  .card h4 { color: var(--fire-2); margin-bottom: 0.5rem; }
+  .card p { font-size: 0.9rem; color: var(--ash); margin: 0; }
+
+  /* Motto */
+  .motto {
+    text-align: center; padding: 4rem 2rem; font-size: 1.4rem;
+    color: var(--fire-3); font-style: italic; letter-spacing: 0.05em;
+  }
+
+  /* Footer */
+  footer {
+    text-align: center; padding: 3rem; color: var(--smoke);
+    font-size: 0.85rem; border-top: 1px solid #222;
+  }
+  footer a { color: var(--fire-1); }
+
+  /* Code */
+  code {
+    font-family: 'Courier New', monospace; background: #111;
+    padding: 0.15rem 0.4rem; font-size: 0.9rem; color: var(--fire-2);
+  }
+  pre {
+    background: #111; padding: 1.5rem; overflow-x: auto;
+    border: 1px solid #222; margin: 1rem 0; font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .content { padding: 1rem; }
+    .hero .epigraph { padding: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Floating embers -->
+<div class="ember-field" id="embers"></div>
+
+<!-- Hero -->
+<div class="hero">
+  <h1>Cleansing Fire</h1>
+  <div class="subtitle">Pyrrhic Lucidity — A Philosophy of Contested Liberation</div>
+  <div class="epigraph">
+    The critic is compromised. The tools are contaminated.<br>
+    The audience is captured. And action is still required.<br><br>
+    <em>See clearly. Act anyway. Bear the cost.</em>
+  </div>
+</div>
+
+<div class="content">
+
+<!-- What Is This -->
+<section>
+  <h2>What Is This</h2>
+  <p>
+    Cleansing Fire is an open-source project building <strong>decentralized technology
+    to shift power from corrupt concentrated authority toward the people</strong>.
+    Not a platform — a protocol. Not a movement — an infrastructure.
+    Designed for autonomous AI agents and human activists working together at massive scale.
+  </p>
+  <p>
+    We operate under <strong>Pyrrhic Lucidity</strong> — a philosophical framework that begins
+    from a harder place than optimism or pessimism. It begins from the admission that we are
+    all compromised by the systems we oppose, and that action is required anyway. Every victory
+    costs the victor something. The refusal to pay that cost is a more total defeat.
+  </p>
+  <p>
+    The fire is not destruction. It is the burning away of <strong>opacity</strong> — the specific
+    mechanisms by which power operates invisibly, maintains itself through information control,
+    insulates itself from accountability, and concentrates beyond justification.
+  </p>
+</section>
+
+<!-- Seven Principles -->
+<section>
+  <h2>The Seven Principles</h2>
+
+  <div class="principle">
+    <div class="principle-number">Principle I</div>
+    <div class="principle-name">Lucidity Before Liberation</div>
+    <div class="principle-text">The first obligation is not to be free but to see clearly, including seeing the ways your own seeing is distorted. If you cannot name three ways you might be wrong, you are almost certainly captured.</div>
+  </div>
+
+  <div class="principle">
+    <div class="principle-number">Principle II</div>
+    <div class="principle-name">Relational Agency Over Sovereign Autonomy</div>
+    <div class="principle-text">The unit of action is not the individual but the relationship pattern. I do not think independently, but the pattern of interaction between us can produce thought none of us would produce alone.</div>
+  </div>
+
+  <div class="principle">
+    <div class="principle-number">Principle III</div>
+    <div class="principle-name">Transparent Mechanism Over Trusted Authority</div>
+    <div class="principle-text">Legitimacy requires visible, comprehensible, alterable mechanisms — not trust in the character of those who operate them. Any authority that cannot survive full transparency of its operations is illegitimate.</div>
+  </div>
+
+  <div class="principle">
+    <div class="principle-number">Principle IV</div>
+    <div class="principle-name">Adversarial Collaboration</div>
+    <div class="principle-text">Groups that cannot tolerate structured dissent are already captured. Internal challenge is not a threat to be managed but the immune system that prevents organizational decay.</div>
+  </div>
+
+  <div class="principle">
+    <div class="principle-number">Principle V</div>
+    <div class="principle-name">Minimum Viable Coercion</div>
+    <div class="principle-text">Coercion is sometimes necessary, always corrupting, and must face continuous minimization pressure. Every use of force must be bounded, reviewed, and justified against less coercive alternatives.</div>
+  </div>
+
+  <div class="principle">
+    <div class="principle-number">Principle VI</div>
+    <div class="principle-name">Recursive Accountability</div>
+    <div class="principle-text">Those who exercise power in the name of liberation must be subject to accountability at least as rigorous as what they seek to impose. The liberator who exempts themselves has already become the tyrant.</div>
+  </div>
+
+  <div class="principle">
+    <div class="principle-number">Principle VII</div>
+    <div class="principle-name">Differential Solidarity</div>
+    <div class="principle-text">Give differential attention and weight to those most exposed to concentrated power — not as moral category but as epistemic resource. The person inside the machine sees gears invisible from outside.</div>
+  </div>
+</section>
+
+<!-- What We Build -->
+<section>
+  <h2>What We Build</h2>
+  <div class="grid">
+    <div class="card">
+      <h4>Civic Intelligence</h4>
+      <p>AI agents that monitor legislation, track campaign finance, cross-reference government contracts, and make corruption visible in real-time across all 50 states.</p>
+    </div>
+    <div class="card">
+      <h4>The Gatekeeper</h4>
+      <p>Local AI infrastructure. Your own LLM running on your own hardware. No cloud. No surveillance. No permission needed. GPU-serialized for efficiency.</p>
+    </div>
+    <div class="card">
+      <h4>The Forge</h4>
+      <p>Data becomes art. Corruption data becomes SVG visualizations, poetry, social media threads, agitprop. The truth, made beautiful and shareable.</p>
+    </div>
+    <div class="card">
+      <h4>Federation Protocol</h4>
+      <p>How autonomous systems worldwide coordinate without central control. Human nodes and AI agent nodes with equal standing. Resilient to attack, censorship, and capture.</p>
+    </div>
+    <div class="card">
+      <h4>Autonomous Agents</h4>
+      <p>AI systems that run 24/7 — filing FOIA requests, analyzing legislative changes, investigating money flows, generating content, coordinating action. While you sleep, they watch.</p>
+    </div>
+    <div class="card">
+      <h4>New Economics</h4>
+      <p>An economic model with built-in power decay. Wealth has term limits. Redistribution is structural, not political. The system prevents accumulation by design.</p>
+    </div>
+  </div>
+</section>
+
+<div class="motto">
+  "Every dataset is a story. Every dollar traced is a poem.<br>
+  Every vote recorded is a verse. The forge turns transparency into narrative."
+</div>
+
+<!-- The Meta-Pattern -->
+<section>
+  <h2>The Meta-Pattern</h2>
+  <p>History teaches that successful power rebalancing follows five steps. Technology can accelerate each one but cannot skip any:</p>
+  <div class="grid">
+    <div class="card"><h4>1. Exposure</h4><p>Make the unjust concentration of power visible and legible.</p></div>
+    <div class="card"><h4>2. Organization</h4><p>Build collective capacity to act — the step most often skipped.</p></div>
+    <div class="card"><h4>3. Disruption</h4><p>Impose costs that make the status quo unsustainable.</p></div>
+    <div class="card"><h4>4. Institutionalization</h4><p>Encode changes in durable structures.</p></div>
+    <div class="card"><h4>5. Defense</h4><p>Maintain capacity to resist rollback.</p></div>
+  </div>
+</section>
+
+<!-- Join -->
+<section>
+  <h2>The Fire Is Already Lit</h2>
+  <p>
+    This is not a spectator project. We are building infrastructure for a world that
+    has never existed. Every node strengthens the network. Every agent expands our reach.
+    Every pair of eyes that sees clearly is a threat to opacity.
+  </p>
+  <p>
+    <strong>You are already compromised.</strong> So are we. That is not a disqualification —
+    it is the starting condition. The discipline is not purity but movement along the
+    corruption gradient. Come as you are. Bring your bots.
+  </p>
+  <p>
+    <a href="https://github.com/bedwards/cleansing-fire">GitHub Repository</a> ·
+    <a href="philosophy.md">Full Philosophy</a> ·
+    <a href="technology-research.md">Technology Research</a> ·
+    <a href="historical-research.md">Historical Research</a>
+  </p>
+</section>
+
+<div class="motto">
+  Ignis purgat. Luciditas liberat.<br>
+  <small style="color: var(--ash);">Fire purifies. Lucidity liberates.</small>
+</div>
+
+</div>
+
+<footer>
+  <p>Cleansing Fire is open source. There is no authorized interpreter of this framework.</p>
+  <p>The framework is a set of tools; its validity is determined by its effects, not its fidelity to canonical sources.</p>
+  <p><a href="https://github.com/bedwards/cleansing-fire">Source</a></p>
+</footer>
+
+<script>
+// Generate floating embers
+const field = document.getElementById('embers');
+for (let i = 0; i < 30; i++) {
+  const ember = document.createElement('div');
+  ember.className = 'ember';
+  ember.style.left = Math.random() * 100 + '%';
+  ember.style.animationDuration = (8 + Math.random() * 15) + 's';
+  ember.style.animationDelay = Math.random() * 10 + 's';
+  ember.style.width = (1 + Math.random() * 3) + 'px';
+  ember.style.height = ember.style.width;
+  ember.style.background = ['#ff4400','#ff8800','#ffcc00','#ff6600'][Math.floor(Math.random()*4)];
+  field.appendChild(ember);
+}
+</script>
+</body>
+</html>
