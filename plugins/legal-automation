@@ -146,74 +146,55 @@ FEDERAL_AGENCY_FOIA_CONTACTS = {
 COMPLAINT_AGENCIES = {
     "FTC": {
         "name": "Federal Trade Commission",
-        "jurisdiction": "Unfair or deceptive acts or practices, antitrust, consumer protection",
+        "jurisdiction": "Unfair/deceptive practices, antitrust, consumer protection",
         "statute": "15 U.S.C. Section 45 (FTC Act, Section 5)",
         "filing_url": "https://reportfraud.ftc.gov/",
-        "additional_statutes": [
-            "15 U.S.C. Section 41 et seq. (FTC Act)",
-            "15 U.S.C. Section 1 et seq. (Sherman Act)",
-            "15 U.S.C. Section 1681 et seq. (Fair Credit Reporting Act)",
-            "16 C.F.R. Part 255 (Endorsement Guides)",
-        ],
+        "additional_statutes": ["15 U.S.C. Section 41 et seq. (FTC Act)",
+                                "15 U.S.C. Section 1 et seq. (Sherman Act)",
+                                "15 U.S.C. Section 1681 et seq. (FCRA)"],
     },
     "FCC": {
         "name": "Federal Communications Commission",
-        "jurisdiction": "Telecommunications, broadcasting, media regulation, net neutrality",
+        "jurisdiction": "Telecommunications, broadcasting, net neutrality",
         "statute": "47 U.S.C. Section 151 et seq. (Communications Act of 1934)",
         "filing_url": "https://consumercomplaints.fcc.gov/",
-        "additional_statutes": [
-            "47 U.S.C. Section 222 (Customer Proprietary Network Information)",
-            "47 U.S.C. Section 227 (Telephone Consumer Protection Act)",
-            "47 U.S.C. Section 338 (Carriage of Local Television Signals)",
-        ],
+        "additional_statutes": ["47 U.S.C. Section 222 (CPNI)",
+                                "47 U.S.C. Section 227 (TCPA)"],
     },
     "SEC": {
         "name": "Securities and Exchange Commission",
-        "jurisdiction": "Securities fraud, market manipulation, insider trading, corporate disclosure",
+        "jurisdiction": "Securities fraud, market manipulation, insider trading",
         "statute": "15 U.S.C. Section 78u-6 (Dodd-Frank Whistleblower Program)",
         "filing_url": "https://www.sec.gov/whistleblower",
-        "additional_statutes": [
-            "15 U.S.C. Section 77a et seq. (Securities Act of 1933)",
-            "15 U.S.C. Section 78a et seq. (Securities Exchange Act of 1934)",
-            "18 U.S.C. Section 1514A (Sarbanes-Oxley Section 806)",
-            "17 C.F.R. Section 240.10b-5 (Rule 10b-5, anti-fraud)",
-        ],
+        "additional_statutes": ["15 U.S.C. Section 77a et seq. (Securities Act of 1933)",
+                                "15 U.S.C. Section 78a et seq. (Exchange Act of 1934)",
+                                "17 C.F.R. Section 240.10b-5 (Rule 10b-5)"],
     },
     "EPA": {
         "name": "Environmental Protection Agency",
-        "jurisdiction": "Environmental violations, pollution, hazardous waste, Clean Air/Water Act",
+        "jurisdiction": "Environmental violations, pollution, hazardous waste",
         "statute": "Various -- see specific environmental statutes",
         "filing_url": "https://echo.epa.gov/report-environmental-violations",
-        "additional_statutes": [
-            "42 U.S.C. Section 7401 et seq. (Clean Air Act)",
-            "33 U.S.C. Section 1251 et seq. (Clean Water Act)",
-            "42 U.S.C. Section 6901 et seq. (RCRA, hazardous waste)",
-            "42 U.S.C. Section 9601 et seq. (CERCLA/Superfund)",
-            "15 U.S.C. Section 2601 et seq. (Toxic Substances Control Act)",
-        ],
+        "additional_statutes": ["42 U.S.C. Section 7401 et seq. (Clean Air Act)",
+                                "33 U.S.C. Section 1251 et seq. (Clean Water Act)",
+                                "42 U.S.C. Section 9601 et seq. (CERCLA/Superfund)"],
     },
     "CFPB": {
         "name": "Consumer Financial Protection Bureau",
-        "jurisdiction": "Consumer financial products, predatory lending, debt collection, credit reporting",
+        "jurisdiction": "Consumer financial products, predatory lending, debt collection",
         "statute": "12 U.S.C. Section 5481 et seq. (Dodd-Frank Title X)",
         "filing_url": "https://www.consumerfinance.gov/complaint/",
-        "additional_statutes": [
-            "15 U.S.C. Section 1601 et seq. (Truth in Lending Act)",
-            "15 U.S.C. Section 1692 et seq. (Fair Debt Collection Practices Act)",
-            "12 U.S.C. Section 2601 et seq. (Real Estate Settlement Procedures Act)",
-            "15 U.S.C. Section 1681 et seq. (Fair Credit Reporting Act)",
-        ],
+        "additional_statutes": ["15 U.S.C. Section 1601 et seq. (TILA)",
+                                "15 U.S.C. Section 1692 et seq. (FDCPA)",
+                                "15 U.S.C. Section 1681 et seq. (FCRA)"],
     },
     "state-AG": {
         "name": "State Attorney General",
-        "jurisdiction": "State consumer protection, antitrust, civil rights, environmental enforcement",
-        "statute": "Varies by state -- typically state consumer protection act and AG enabling statute",
-        "filing_url": "Varies by state -- search '[state] attorney general consumer complaint'",
-        "additional_statutes": [
-            "State Unfair and Deceptive Acts and Practices (UDAP) statutes",
-            "State antitrust statutes",
-            "State data breach notification laws",
-        ],
+        "jurisdiction": "State consumer protection, antitrust, civil rights",
+        "statute": "Varies by state -- typically state consumer protection act",
+        "filing_url": "Search '[state] attorney general consumer complaint'",
+        "additional_statutes": ["State UDAP statutes", "State antitrust statutes",
+                                "State data breach notification laws"],
     },
 }
 
@@ -426,38 +407,21 @@ def generate_foia(agency, subject, date_range="", specifics="", level="federal",
 
     today = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
-    prompt = f"""Generate a complete, professional FOIA request letter with the following details:
+    fee_line = f"Include fee waiver citing {statute_info.get('fee_waiver_basis', 'public interest')}." if request_fee_waiver else ""
+    exp_line = f"Include expedited processing request citing {statute_info.get('expedited_basis', 'compelling need')}." if request_expedited else ""
 
-REQUESTER INFORMATION:
-- Date: {today}
-- Agency: {agency_contact}
-- Statute: {statute_cite} ({statute_name})
-{f"- State-specific statute: {state_statute}" if state_statute else ""}
+    prompt = f"""Generate a professional FOIA request letter.
 
-REQUEST DETAILS:
-- Subject of request: {subject}
-{f"- Date range: {date_range}" if date_range else ""}
-{f"- Specific records sought: {specifics}" if specifics else ""}
+Date: {today}. Agency: {agency_contact}. Statute: {statute_cite} ({statute_name}).
+{f"State statute: {state_statute}. " if state_statute else ""}Subject: {subject}.
+{f"Date range: {date_range}. " if date_range else ""}{f"Specifics: {specifics}. " if specifics else ""}
 
-INCLUDE THE FOLLOWING SECTIONS:
-1. Formal salutation and opening paragraph citing the applicable statute
-2. Detailed description of records requested, using "reasonable particularity"
-3. Preferred format for records (electronic, if available)
-{"4. Fee waiver request citing " + statute_info.get("fee_waiver_basis", "public interest") if request_fee_waiver else ""}
-{"5. Request for expedited processing citing " + statute_info.get("expedited_basis", "compelling need") if request_expedited else ""}
-6. Statement of willingness to pay reasonable fees (if fee waiver denied), up to $25 without prior notification
-7. Request for Vaughn index if any records are withheld
-8. Statement of right to appeal under {statute_info.get("appeal_statute", "applicable law")}
-9. Contact information placeholders ([YOUR NAME], [YOUR ADDRESS], [YOUR EMAIL], [YOUR PHONE])
-10. Formal closing
-
-The letter must be:
-- Formally worded but readable
-- Legally precise in its citations
-- Specific enough to be actionable but broad enough to capture relevant records
-- Ready to send after filling in requester details
-
-Generate ONLY the letter text, no commentary."""
+Include: formal opening citing statute, detailed records description with reasonable
+particularity, electronic format preference, {fee_line} {exp_line}
+willingness to pay up to $25, Vaughn index request if records withheld,
+right to appeal under {statute_info.get("appeal_statute", "applicable law")},
+placeholders for [YOUR NAME], [YOUR ADDRESS], [YOUR EMAIL], [YOUR PHONE].
+Formally worded, legally precise, ready to send. Generate ONLY the letter."""
 
     content = ask_gatekeeper(prompt, temperature=0.2, max_tokens=4096)
     if not content:
@@ -562,42 +526,20 @@ def draft_complaint(complaint_type, subject, facts=None, evidence=None):
 
     statutes_str = "\n".join(f"  - {s}" for s in agency_info.get("additional_statutes", []))
 
-    prompt = f"""Draft a formal regulatory complaint to the {agency_info['name']} regarding the following matter:
+    prompt = f"""Draft a formal regulatory complaint to the {agency_info['name']}.
 
-AGENCY: {agency_info['name']}
-JURISDICTION: {agency_info['jurisdiction']}
-PRIMARY STATUTE: {agency_info['statute']}
-ADDITIONAL APPLICABLE STATUTES:
-{statutes_str}
+Agency: {agency_info['name']}. Jurisdiction: {agency_info['jurisdiction']}.
+Primary statute: {agency_info['statute']}. Additional: {statutes_str}
 
-SUBJECT OF COMPLAINT: {subject}
+Subject: {subject}
+Facts:\n{facts_str}
+Evidence:\n{evidence_str}
 
-FACTUAL ALLEGATIONS:
-{facts_str}
-
-SUPPORTING EVIDENCE:
-{evidence_str}
-
-STRUCTURE THE COMPLAINT AS FOLLOWS:
-1. CAPTION -- Formal heading with agency name and "Complaint" designation
-2. PARTIES -- Complainant (placeholder) and Respondent (the subject)
-3. JURISDICTION AND AUTHORITY -- Cite the agency's statutory authority
-4. STATEMENT OF FACTS -- Organized chronologically, numbered paragraphs
-5. VIOLATIONS -- Specific statutory or regulatory provisions violated, with analysis
-6. EVIDENCE -- Summary of supporting evidence with reference to attachments
-7. RELIEF REQUESTED -- Specific actions requested (investigation, enforcement, penalties, injunction)
-8. CONCLUSION -- Summary and request for prompt action
-9. SIGNATURE BLOCK -- Placeholder for complainant information
-
-The complaint must:
-- Be formally structured like a real regulatory filing
-- Cite specific statutory provisions with section numbers
-- Present facts in numbered paragraphs
-- Clearly connect facts to legal violations
-- Request specific, concrete relief
-- Be professional and evidence-based in tone
-
-Generate ONLY the complaint text."""
+Structure: 1) Caption with agency name, 2) Parties (complainant placeholder, respondent),
+3) Jurisdiction citing statutory authority, 4) Statement of facts in numbered paragraphs,
+5) Violations with specific statutory provisions, 6) Evidence summary referencing attachments,
+7) Relief requested (investigation, enforcement, penalties), 8) Conclusion, 9) Signature block.
+Formally structured, cite section numbers, connect facts to violations. ONLY the complaint text."""
 
     content = ask_gatekeeper(prompt, temperature=0.2, max_tokens=4096)
     if not content:
@@ -671,52 +613,18 @@ def generate_rights_card(scenario, state=""):
     statutes_str = "\n".join(f"  - {s}" for s in scenario_info["key_statutes"])
     state_note = f"\n\nSTATE-SPECIFIC: Generate rights information specific to {state} where applicable. Include state-specific statutes and protections." if state else ""
 
-    prompt = f"""Generate a comprehensive know-your-rights information card for the following scenario:
-
-SCENARIO: {scenario_info['title']}
+    prompt = f"""Generate a know-your-rights card for: {scenario_info['title']}
 {state_note}
 
-CONSTITUTIONAL PROTECTIONS:
-{amendments_str}
+Constitutional protections: {amendments_str}
+Key statutes/cases: {statutes_str}
 
-KEY STATUTES AND CASES:
-{statutes_str}
-
-STRUCTURE THE RIGHTS CARD AS FOLLOWS:
-
-1. TITLE -- Bold, clear title
-
-2. YOUR RIGHTS -- Numbered list of specific, actionable rights. Be concrete:
-   not "you have the right to free speech" but "you have the right to
-   photograph and record police officers performing their duties in public
-   spaces (subject to reasonable time, place, and manner restrictions)."
-
-3. DO -- Numbered list of concrete actions to take. Practical, specific,
-   memorable. Include exact phrases to say (e.g., "I am exercising my
-   right to remain silent. I want to speak to a lawyer.").
-
-4. DO NOT -- Numbered list of actions to avoid. Be specific about why
-   each is risky and what legal consequence could follow.
-
-5. IF YOUR RIGHTS ARE VIOLATED -- Step-by-step instructions for documenting
-   the violation and seeking remedy. Include specific organizations to contact.
-
-6. EMERGENCY CONTACTS -- Placeholder section with categories:
-   - National: ACLU, NLG Legal Observer Hotline, etc.
-   - Local: [state/city specific legal aid]
-   - Personal: [space for personal emergency contacts]
-
-7. LEGAL CITATIONS -- Brief list of the most important citations for
-   someone who wants to verify or learn more.
-
-The card must be:
-- Written in plain, direct language (8th grade reading level)
-- Memorizable -- the key points should be short enough to remember
-- Accurate in its legal citations
-- Practical -- focused on what to DO, not abstract legal theory
-- Empowering -- the reader should feel more capable after reading it
-
-Generate ONLY the rights card content."""
+Sections: 1) TITLE, 2) YOUR RIGHTS -- numbered, specific, actionable (e.g. "you can
+record police in public"), 3) DO -- concrete actions with exact phrases to say,
+4) DO NOT -- actions to avoid with legal consequences, 5) IF RIGHTS VIOLATED --
+steps to document and seek remedy, 6) EMERGENCY CONTACTS (ACLU, NLG, local legal aid,
+personal), 7) LEGAL CITATIONS. Plain language (8th grade level), memorizable, accurate
+citations, practical. Generate ONLY the card content."""
 
     content = ask_gatekeeper(prompt, temperature=0.3, max_tokens=4096)
     if not content:
@@ -807,53 +715,21 @@ def respond_to_threat(threat_type, original_text="", our_position=""):
 
     original_excerpt = original_text[:2000] if original_text else "(No original threat text provided)"
 
-    prompt = f"""Draft a professional response letter to a {defense_info['name']} legal threat.
+    prompt = f"""Draft a professional response to a {defense_info['name']} legal threat.
 
-THREAT TYPE: {defense_info['name']}
+Threat type: {defense_info['name']}
+Original threat: {original_excerpt}
+Our position: {our_position or "(General defense template)"}
+Defenses: {defenses_str}
+Authorities: {statutes_str}
 
-ORIGINAL THREAT (excerpt):
-{original_excerpt}
-
-OUR POSITION:
-{our_position or "(Position not specified -- generate a general defense template)"}
-
-AVAILABLE LEGAL DEFENSES:
-{defenses_str}
-
-KEY LEGAL AUTHORITIES:
-{statutes_str}
-
-STRUCTURE THE RESPONSE AS FOLLOWS:
-
-1. HEADER -- Professional letterhead placeholder, date, recipient information
-2. RE LINE -- Clear identification of the threat being responded to
-3. OPENING -- Professional acknowledgment of receipt, without conceding any point
-4. FACTUAL RESPONSE -- Point-by-point response to the specific allegations,
-   organized to correspond to the original threat's claims
-5. LEGAL ANALYSIS -- Identification of applicable defenses with citations.
-   Emphasize:
-   - First Amendment protections where applicable
-   - Anti-SLAPP statutes where applicable (note jurisdiction-specific applicability)
-   - The specific substantive defenses listed above
-6. COUNTERVAILING CONCERNS -- Where appropriate, note:
-   - Public interest in the speech at issue
-   - Potential Streisand effect
-   - That aggressive pursuit of meritless claims may itself have legal consequences
-   - Anti-SLAPP fee-shifting provisions where applicable
-7. CONCLUSION -- Professional but firm statement that the claims lack merit,
-   that the speech/conduct will continue (if appropriate), and preservation
-   of all rights and defenses
-8. SIGNATURE BLOCK -- Placeholder
-
-The response must:
-- Be professionally worded (this is a legal letter, not a blog post)
-- Firmly assert rights without being inflammatory
-- Cite actual statutes and case law accurately
-- NOT concede any factual or legal point
-- Preserve all defenses and rights
-- Note that this is a preliminary response and that formal legal counsel is being consulted
-
-Generate ONLY the response letter text."""
+Structure: 1) Header with letterhead placeholder and date, 2) RE line identifying the
+threat, 3) Opening acknowledging receipt without conceding, 4) Point-by-point factual
+response, 5) Legal analysis with defenses and citations (emphasize First Amendment,
+anti-SLAPP where applicable), 6) Countervailing concerns (public interest, Streisand
+effect, anti-SLAPP fee-shifting), 7) Firm conclusion preserving all rights and defenses,
+noting counsel is being consulted, 8) Signature placeholder.
+Professional, cite statutes accurately, concede nothing. ONLY the response letter."""
 
     content = ask_gatekeeper(prompt, temperature=0.2, max_tokens=4096)
     if not content:
