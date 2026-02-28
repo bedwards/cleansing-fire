@@ -282,19 +282,27 @@ workers/orchestrator.sh implement <span class="str">"Build SEC filing plugin"</s
   <h2 id="plugins-h">Plugin System</h2>
   <p>Plugins are executable scripts that accept JSON on stdin and produce JSON on stdout. Any language. Self-contained.</p>
 
-  <h3>Available Plugins</h3>
+  <h3>Available Plugins (15)</h3>
   <pre><span class="comment"># Civic Data (government + corporate intelligence)</span>
-plugins/civic-legiscan    <span class="comment"># Legislative monitoring (needs LEGISCAN_API_KEY)</span>
-plugins/civic-fec         <span class="comment"># Campaign finance (FEC API)</span>
-plugins/civic-spending    <span class="comment"># Government contracts (USAspending)</span>
-plugins/civic-crossref    <span class="comment"># Cross-reference corruption detector</span>
+plugins/civic-legiscan       <span class="comment"># Legislative monitoring (needs LEGISCAN_API_KEY)</span>
+plugins/civic-fec            <span class="comment"># Campaign finance (FEC API)</span>
+plugins/civic-spending       <span class="comment"># Government contracts (USAspending)</span>
+plugins/civic-crossref       <span class="comment"># Cross-reference corruption detector</span>
+
+<span class="comment"># Corporate Intelligence</span>
+plugins/corp-sec             <span class="comment"># SEC EDGAR filing analyzer</span>
+plugins/lobby-tracker        <span class="comment"># Lobbying disclosure + revolving door</span>
+plugins/osint-social         <span class="comment"># Social media OSINT + coordination detection</span>
+plugins/news-monitor         <span class="comment"># RSS/API news monitoring (13 feeds)</span>
+plugins/narrative-detector   <span class="comment"># Coordinated narrative + PR campaign detection</span>
+plugins/whistleblower-submit <span class="comment"># Encrypted secure tip submission</span>
 
 <span class="comment"># The Forge (content generation)</span>
-plugins/forge-vision      <span class="comment"># SVG visualizations, ASCII art, Mermaid diagrams</span>
-plugins/forge-voice       <span class="comment"># Social posts, poetry, agitprop, satire</span>
+plugins/forge-vision         <span class="comment"># SVG visualizations, ASCII art, Mermaid diagrams</span>
+plugins/forge-voice          <span class="comment"># Social posts, poetry, agitprop, satire</span>
 
 <span class="comment"># Pipelines</span>
-plugins/pipeline-data-to-fire  <span class="comment"># Full: data → analysis → viz → narrative → distribution</span></pre>
+plugins/pipeline-data-to-fire <span class="comment"># Full: data → analysis → viz → narrative → distribution</span></pre>
 
   <h3>Plugin Interface</h3>
   <pre><span class="comment"># Calling a plugin</span>
@@ -547,6 +555,16 @@ scripts/verify-integrity.sh --ci</pre>
       <span class="format fmt-md">Tutorial</span>
       <h4>Claude Code Tutorial</h4>
       <p>Step-by-step Claude Code CLI guide for beginners. Your interface to the system.</p>
+    </a>
+    <a href="disinformation-defense.md" class="spec-card">
+      <span class="format fmt-md">Research</span>
+      <h4>Disinformation Defense</h4>
+      <p>Detection methods, counter-strategies, corporate disinfo playbooks, platform manipulation, building resilience. 835 lines.</p>
+    </a>
+    <a href="chaos-research.md" class="spec-card">
+      <span class="format fmt-md">Research</span>
+      <h4>Chaos Research</h4>
+      <p>Serendipity methodology, 40 random Wikipedia forced-connections, emergent patterns, Oblique Strategies. 1,246 lines.</p>
     </a>
   </div>
 </section>
