@@ -204,7 +204,8 @@ Separate from GitHub Pages — these handle compute, API, and AI inference at th
 - **fire-api** (`edge/fire-api/`) - REST gateway for investigations, queries (D1, KV, R2, Queue bindings)
 - **fire-ai** (`edge/fire-ai/`) - Workers AI inference: analysis, embeddings, summarization, classification
 - **fire-markdown** (`edge/fire-markdown/`) - LLM-accessible markdown proxy (Accept: text/markdown header)
-- Deployed via `.github/workflows/deploy-workers.yml` using wrangler
+- **fire-relay** (`edge/fire-relay/`) - Federation bootstrap relay: node registration, peer discovery, intelligence relay. KV + D1.
+- Deployed via `.github/workflows/deploy-workers.yml` using wrangler (4 workers)
 - See `docs/cloudflare-implementation.md` for full architecture and cost analysis
 
 ## Key Research Documents
