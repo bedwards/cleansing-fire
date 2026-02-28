@@ -1,0 +1,880 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Coordinated Narrative Detector
+
+Analyzes news articles, press releases, and media content to detect
+coordinated narratives, PR campaigns, astroturfing patterns, and
+manufactured consensus. Compares content across sources to identify
+when many outlets are publishing suspiciously similar framing, language,
+or timing -- the fingerprints of a coordinated messaging operation.
+
+Why this matters:
+  Manufactured consent is how power maintains itself without visible
+  coercion. When the same talking points appear simultaneously across
+  "independent" media outlets, it is almost never organic. PR firms,
+  think tanks, trade associations, and political operations distribute
+  pre-written narratives through wire services, op-ed placement, and
+  social media campaigns. This plugin detects the patterns that reveal
+  the machinery behind the message.
+
+Data sources:
+  - GDELT Project (Global Database of Events, Language, and Tone)
+  - News API / MediaStack for article fetching
+  - Wikipedia current events for baseline context
+  - RSS feeds from configurable sources
+  - Gatekeeper LLM for deep content analysis
+
+Plugin manifest:
+  name: narrative-detector
+  category: osint
+  actions: [analyze_article, compare_articles, detect_campaign,
+            track_narrative, source_analysis, framing_analysis,
+            timeline, think_tank_trace]
+  requires_env: []
+  uses_gatekeeper: true
+
+Input JSON:
+  {"action": "analyze_article", "url": "https://...", "text": "..."}
+  {"action": "compare_articles", "articles": [{"url": "...", "text": "..."}, ...]}
+  {"action": "detect_campaign", "topic": "AI regulation", "days": 7}
+  {"action": "track_narrative", "phrase": "responsible AI", "days": 30}
+  {"action": "source_analysis", "source": "Heritage Foundation"}
+  {"action": "framing_analysis", "topic": "minimum wage", "texts": ["...", "..."]}
+  {"action": "timeline", "topic": "data privacy bill", "days": 14}
+  {"action": "think_tank_trace", "claim": "regulation kills innovation"}
+
+Output JSON: structured analysis with coordination scores and evidence
+"""
+
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import Counter
+from datetime import datetime, timezone, timedelta
+
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+GDELT_BASE = "https://api.gdeltproject.org/api/v2"
+
+
+def web_request(url, headers=None, timeout=30):
+    """Make an HTTP GET request."""
+    default_headers = {
+        "User-Agent": "CleansingFire/0.1 (media analysis; https://github.com/bedwards/cleansing-fire)",
+        "Accept": "application/json",
+    }
+    if headers:
+        default_headers.update(headers)
+
+    req = urllib.request.Request(url, headers=default_headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {"_raw_text": raw}
+    except urllib.error.HTTPError as e:
+        return {"error": f"HTTP {e.code}: {e.reason}", "error_code": "API_ERROR"}
+    except urllib.error.URLError as e:
+        return {"error": f"Connection error: {e.reason}", "error_code": "API_ERROR"}
+    except Exception as e:
+        return {"error": str(e), "error_code": "INTERNAL_ERROR"}
+
+
+def ask_gatekeeper(prompt, system="", temperature=0.2, max_tokens=2048):
+    """Submit analysis to gatekeeper LLM."""
+    payload = {
+        "prompt": prompt,
+        "system": system or (
+            "You are a media analyst and propaganda detection specialist. "
+            "You identify coordinated narratives, manufactured consensus, PR campaigns, "
+            "astroturfing, and information warfare techniques. You analyze framing, "
+            "sourcing, timing, and language patterns. You distinguish organic discourse "
+            "from manufactured messaging. Apply the principle of Pyrrhic Lucidity: "
+            "make the hidden machinery of narrative control visible."
+        ),
+        "caller": "plugin:narrative-detector",
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout": 180,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=190) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return f"[LLM Error: {body.get('error', 'unknown')}]"
+    except Exception as e:
+        return f"[Gatekeeper unavailable: {e}]"
+
+
+# ---------------------------------------------------------------------------
+# Text analysis utilities
+# ---------------------------------------------------------------------------
+
+def extract_text_from_url(url):
+    """Fetch and extract readable text from a URL."""
+    result = web_request(url, timeout=15)
+    if "error" in result:
+        return ""
+
+    raw = result.get("_raw_text", "")
+    if not raw:
+        return json.dumps(result)[:5000]
+
+    # Basic HTML text extraction
+    # Remove script and style blocks
+    text = re.sub(r"<script[^>]*>.*?</script>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove HTML tags
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Decode HTML entities
+    text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = text.replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " ")
+    # Normalize whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text[:15000]  # Limit to 15KB
+
+
+def compute_text_fingerprint(text):
+    """
+    Compute a 'fingerprint' of a text for similarity comparison.
+    Uses n-gram frequency distribution.
+    """
+    # Normalize
+    text = text.lower()
+    words = re.findall(r"\b[a-z]{3,}\b", text)
+
+    # Bigram frequency
+    bigrams = [f"{words[i]}_{words[i+1]}" for i in range(len(words) - 1)]
+    freq = Counter(bigrams)
+
+    # Top 50 bigrams as fingerprint
+    top = freq.most_common(50)
+    return {bg: count for bg, count in top}
+
+
+def text_similarity(fp1, fp2):
+    """
+    Calculate Jaccard similarity between two text fingerprints.
+    Returns 0.0 to 1.0.
+    """
+    keys1 = set(fp1.keys())
+    keys2 = set(fp2.keys())
+
+    if not keys1 or not keys2:
+        return 0.0
+
+    intersection = keys1 & keys2
+    union = keys1 | keys2
+
+    return len(intersection) / len(union)
+
+
+def extract_key_phrases(text, top_n=20):
+    """Extract key phrases from text using simple n-gram frequency."""
+    words = re.findall(r"\b[a-z]{3,}\b", text.lower())
+
+    # Skip very common words
+    stopwords = {
+        "the", "and", "that", "this", "with", "from", "have", "been",
+        "they", "their", "there", "would", "could", "should", "about",
+        "which", "these", "those", "some", "what", "when", "were",
+        "your", "will", "more", "also", "said", "than", "other",
+        "can", "its", "has", "had", "not", "but", "are", "was",
+        "for", "all", "new", "who", "how", "may", "any", "our",
+        "out", "one", "you", "her", "she", "his", "him",
+    }
+
+    filtered = [w for w in words if w not in stopwords]
+
+    # Bigrams
+    bigrams = [f"{filtered[i]} {filtered[i+1]}" for i in range(len(filtered) - 1)]
+
+    # Count both unigrams and bigrams
+    word_freq = Counter(filtered)
+    bigram_freq = Counter(bigrams)
+
+    # Combine, weighting bigrams higher
+    combined = {}
+    for word, count in word_freq.most_common(top_n):
+        combined[word] = count
+    for bg, count in bigram_freq.most_common(top_n):
+        combined[bg] = count * 2  # Weight bigrams higher
+
+    top = sorted(combined.items(), key=lambda x: -x[1])[:top_n]
+    return [phrase for phrase, count in top]
+
+
+# ---------------------------------------------------------------------------
+# GDELT integration (news monitoring)
+# ---------------------------------------------------------------------------
+
+def gdelt_search(query, mode="artlist", days=7, max_records=50):
+    """Search GDELT for news articles on a topic."""
+    # GDELT DOC 2.0 API
+    params = {
+        "query": query,
+        "mode": mode,
+        "maxrecords": str(min(max_records, 250)),
+        "format": "json",
+        "timespan": f"{days}days" if days <= 365 else "365days",
+        "sort": "DateDesc",
+    }
+
+    query_string = urllib.parse.urlencode(params)
+    url = f"{GDELT_BASE}/doc/doc?{query_string}"
+    result = web_request(url, timeout=30)
+
+    if "error" in result:
+        return result
+
+    articles = []
+    for article in result.get("articles", []):
+        articles.append({
+            "url": article.get("url", ""),
+            "title": article.get("title", ""),
+            "source": article.get("domain", article.get("source", "")),
+            "language": article.get("language", ""),
+            "date": article.get("seendate", ""),
+            "socialimage": article.get("socialimage", ""),
+            "tone": article.get("tone", 0),
+        })
+
+    return {
+        "query": query,
+        "articles": articles,
+        "count": len(articles),
+    }
+
+
+def gdelt_timeline(query, days=14):
+    """Get a timeline of media coverage intensity for a topic."""
+    params = {
+        "query": query,
+        "mode": "timelinevol",
+        "format": "json",
+        "timespan": f"{days}days",
+    }
+
+    query_string = urllib.parse.urlencode(params)
+    url = f"{GDELT_BASE}/doc/doc?{query_string}"
+    result = web_request(url, timeout=20)
+
+    if "error" in result:
+        return result
+
+    timeline_data = result.get("timeline", [])
+    processed = []
+    for series in timeline_data:
+        series_data = series.get("data", [])
+        for point in series_data:
+            processed.append({
+                "date": point.get("date", ""),
+                "value": point.get("value", 0),
+            })
+
+    return {
+        "query": query,
+        "days": days,
+        "timeline": processed,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Core analysis actions
+# ---------------------------------------------------------------------------
+
+def analyze_article(url="", text=""):
+    """Deep analysis of a single article for narrative patterns."""
+    if url and not text:
+        text = extract_text_from_url(url)
+        if not text:
+            return {"error": f"Could not extract text from {url}", "error_code": "API_ERROR"}
+
+    if not text:
+        return {"error": "Provide 'url' or 'text' to analyze.", "error_code": "MISSING_FIELD"}
+
+    # Extract key phrases
+    key_phrases = extract_key_phrases(text)
+
+    # Compute fingerprint
+    fingerprint = compute_text_fingerprint(text)
+
+    # AI deep analysis
+    analysis = ask_gatekeeper(f"""NARRATIVE ANALYSIS of {'article at ' + url if url else 'provided text'}
+
+TEXT (excerpt):
+{text[:8000]}
+
+KEY PHRASES DETECTED: {json.dumps(key_phrases[:15])}
+
+Perform a thorough narrative analysis:
+
+1. FRAMING: How is the issue framed? What assumptions are baked into the framing?
+   - What metaphors or frames are used?
+   - Whose perspective is centered? Whose is absent?
+
+2. SOURCING:
+   - Who is quoted or cited?
+   - Are sources independent or from interested parties (PR, trade groups, think tanks)?
+   - Are there anonymous sources? How are they described?
+   - Is there a single-source dependency?
+
+3. LANGUAGE PATTERNS:
+   - Are there specific phrases that sound like PR talking points?
+   - Is there hedging language that obscures accountability?
+   - Are there weasel words ("some say", "critics argue", "experts believe")?
+
+4. OMISSIONS:
+   - What context is missing?
+   - Whose voice is absent?
+   - What counterarguments are not addressed?
+
+5. NARRATIVE ALIGNMENT:
+   - Does this article align with known corporate or political messaging campaigns?
+   - Does it read like rewritten press release or wire copy?
+   - Is the timing suspicious (before a vote, during a scandal, etc.)?
+
+6. PROPAGANDA TECHNIQUES (check all that apply):
+   - Bandwagon ("everyone agrees")
+   - Appeal to authority (unnamed "experts")
+   - False balance (both-sides-ing an asymmetric issue)
+   - Cherry-picking data
+   - Emotional manipulation
+   - Manufactured urgency
+   - Deflection / whataboutism
+
+7. CREDIBILITY SCORE: 1 (pure propaganda) to 10 (rigorous journalism)
+
+8. LIKELY ORIGIN: Is this genuine journalism, PR-placed content, think tank output, wire service, or manufactured?""",
+        max_tokens=3000,
+    )
+
+    return {
+        "url": url,
+        "text_length": len(text),
+        "key_phrases": key_phrases,
+        "fingerprint_top_bigrams": list(fingerprint.keys())[:10],
+        "ai_analysis": analysis,
+    }
+
+
+def compare_articles(articles):
+    """Compare multiple articles to detect coordinated messaging."""
+    if not articles or len(articles) < 2:
+        return {"error": "Need at least 2 articles to compare.", "error_code": "INVALID_INPUT"}
+
+    processed = []
+    for i, article in enumerate(articles[:10]):  # Limit to 10 articles
+        url = article.get("url", "")
+        text = article.get("text", "")
+
+        if url and not text:
+            text = extract_text_from_url(url)
+
+        if text:
+            fingerprint = compute_text_fingerprint(text)
+            key_phrases = extract_key_phrases(text)
+            processed.append({
+                "index": i,
+                "url": url,
+                "text": text[:3000],
+                "fingerprint": fingerprint,
+                "key_phrases": key_phrases[:10],
+            })
+
+    if len(processed) < 2:
+        return {"error": "Could not extract text from enough articles.", "error_code": "API_ERROR"}
+
+    # Calculate pairwise similarity
+    similarities = []
+    for i in range(len(processed)):
+        for j in range(i + 1, len(processed)):
+            sim = text_similarity(processed[i]["fingerprint"], processed[j]["fingerprint"])
+            shared_phrases = set(processed[i]["key_phrases"]) & set(processed[j]["key_phrases"])
+            similarities.append({
+                "article_a": processed[i]["url"] or f"article_{i}",
+                "article_b": processed[j]["url"] or f"article_{j}",
+                "similarity_score": round(sim, 3),
+                "shared_key_phrases": list(shared_phrases),
+            })
+
+    # Sort by similarity
+    similarities.sort(key=lambda x: -x["similarity_score"])
+
+    # Calculate average and max similarity
+    avg_sim = sum(s["similarity_score"] for s in similarities) / len(similarities) if similarities else 0
+    max_sim = max(s["similarity_score"] for s in similarities) if similarities else 0
+
+    # Determine if this looks coordinated
+    coordination_score = 0.0
+    if max_sim > 0.6:
+        coordination_score += 0.3
+    if avg_sim > 0.4:
+        coordination_score += 0.3
+    # Check for shared rare phrases across multiple articles
+    all_shared = set()
+    for s in similarities:
+        all_shared.update(s["shared_key_phrases"])
+    if len(all_shared) > 5:
+        coordination_score += 0.2
+    coordination_score = min(1.0, coordination_score)
+
+    # AI analysis
+    articles_summary = "\n\n".join(
+        f"ARTICLE {p['index']+1} ({p['url']}):\nKey phrases: {', '.join(p['key_phrases'][:8])}\nExcerpt: {p['text'][:500]}"
+        for p in processed[:5]
+    )
+
+    analysis = ask_gatekeeper(f"""COORDINATED NARRATIVE DETECTION
+
+Comparing {len(processed)} articles:
+
+{articles_summary}
+
+SIMILARITY SCORES:
+{json.dumps(similarities[:10], indent=2)}
+
+Average similarity: {avg_sim:.3f}
+Maximum similarity: {max_sim:.3f}
+Shared phrases across articles: {json.dumps(list(all_shared)[:15])}
+
+DETECT:
+1. Are these articles independently written or do they share a common source?
+2. Do they use the same framing, quotes, or talking points?
+3. Is there evidence of a press release or PR kit being rewritten?
+4. Were they published at similar times (coordinated release)?
+5. Do they cite the same sources or studies?
+6. Is there a common narrative being pushed?
+7. Who benefits from this narrative?
+8. Coordination probability: 0.0 (definitely independent) to 1.0 (definitely coordinated)""")
+
+    return {
+        "articles_analyzed": len(processed),
+        "pairwise_similarities": similarities,
+        "average_similarity": round(avg_sim, 3),
+        "max_similarity": round(max_sim, 3),
+        "shared_phrases": list(all_shared)[:20],
+        "coordination_score": round(coordination_score, 2),
+        "ai_analysis": analysis,
+    }
+
+
+def detect_campaign(topic, days=7):
+    """Detect potential PR/messaging campaigns around a topic."""
+    # Search GDELT for recent coverage
+    gdelt_articles = gdelt_search(topic, days=days, max_records=50)
+
+    if "error" in gdelt_articles:
+        return gdelt_articles
+
+    articles = gdelt_articles.get("articles", [])
+
+    if not articles:
+        return {
+            "topic": topic,
+            "days": days,
+            "articles_found": 0,
+            "note": "No articles found for this topic in the specified timeframe.",
+        }
+
+    # Get timeline of coverage
+    timeline = gdelt_timeline(topic, days=days)
+
+    # Analyze source distribution
+    source_counts = Counter(a.get("source", "unknown") for a in articles)
+    top_sources = source_counts.most_common(15)
+
+    # Analyze tone distribution
+    tones = [float(a.get("tone", 0)) for a in articles if a.get("tone")]
+    avg_tone = sum(tones) / len(tones) if tones else 0
+    tone_variance = sum((t - avg_tone) ** 2 for t in tones) / len(tones) if len(tones) > 1 else 0
+
+    # Detect publication timing clusters
+    dates = [a.get("date", "") for a in articles if a.get("date")]
+    date_counts = Counter(d[:8] for d in dates)  # Group by day
+    max_day = max(date_counts.values()) if date_counts else 0
+
+    # Fetch and analyze a sample of articles for content similarity
+    sample_articles = articles[:5]
+    sample_texts = []
+    for art in sample_articles:
+        url = art.get("url", "")
+        if url:
+            text = extract_text_from_url(url)
+            if text:
+                sample_texts.append({"url": url, "text": text})
+
+    # Compare sample articles
+    comparison = None
+    if len(sample_texts) >= 2:
+        comparison = compare_articles(sample_texts)
+
+    # AI campaign detection
+    analysis = ask_gatekeeper(f"""PR/MESSAGING CAMPAIGN DETECTION: "{topic}"
+
+Time period: last {days} days
+Total articles found: {len(articles)}
+
+SOURCE DISTRIBUTION:
+{json.dumps(top_sources[:10])}
+
+PUBLICATION TIMING:
+{json.dumps(dict(date_counts), indent=2)}
+Peak day articles: {max_day}
+
+TONE ANALYSIS:
+Average tone: {avg_tone:.2f} (negative = hostile, positive = favorable)
+Tone variance: {tone_variance:.2f} (low variance = uniform messaging)
+
+CONTENT SIMILARITY (sample of {len(sample_texts)} articles):
+Average similarity: {comparison.get('average_similarity', 'N/A') if comparison else 'N/A'}
+Shared phrases: {json.dumps(comparison.get('shared_phrases', [])[:10]) if comparison else 'N/A'}
+
+SAMPLE ARTICLES:
+{chr(10).join(f"- {a.get('title', 'No title')} ({a.get('source', 'unknown')}, {a.get('date', '')[:10]})" for a in articles[:10])}
+
+CAMPAIGN DETECTION:
+1. Is there a sudden spike in coverage? When did it start?
+2. Are many outlets using the same framing or language?
+3. Is the source distribution organic (many diverse outlets) or concentrated?
+4. Is the tone unusually uniform (suggesting coordinated messaging)?
+5. Are there signs of a PR campaign: simultaneous publication, shared quotes, identical statistics?
+6. Who is likely behind this campaign?
+7. What is the likely goal of the campaign?
+8. Campaign detection confidence: 0.0 (organic coverage) to 1.0 (definite coordinated campaign)""",
+        max_tokens=3000,
+    )
+
+    return {
+        "topic": topic,
+        "days": days,
+        "articles_found": len(articles),
+        "top_sources": [{"source": s, "count": c} for s, c in top_sources],
+        "publication_timeline": dict(date_counts),
+        "peak_day_articles": max_day,
+        "average_tone": round(avg_tone, 2),
+        "tone_variance": round(tone_variance, 2),
+        "content_similarity": comparison.get("average_similarity") if comparison else None,
+        "timeline_data": timeline.get("timeline", []),
+        "sample_articles": [{"url": a.get("url", ""), "title": a.get("title", "")} for a in articles[:10]],
+        "ai_analysis": analysis,
+    }
+
+
+def track_narrative(phrase, days=30):
+    """Track a specific narrative/phrase over time to detect amplification."""
+    # Use GDELT to track the phrase
+    articles = gdelt_search(f'"{phrase}"', days=days, max_records=100)
+    timeline = gdelt_timeline(f'"{phrase}"', days=days)
+
+    if "error" in articles:
+        return articles
+
+    article_list = articles.get("articles", [])
+
+    # Analyze source and timing
+    source_counts = Counter(a.get("source", "") for a in article_list)
+    date_counts = Counter(a.get("date", "")[:8] for a in article_list if a.get("date"))
+
+    # Detect amplification pattern (exponential growth)
+    sorted_dates = sorted(date_counts.items())
+    growth_rate = 0.0
+    if len(sorted_dates) >= 2:
+        first_half = sum(v for _, v in sorted_dates[:len(sorted_dates)//2])
+        second_half = sum(v for _, v in sorted_dates[len(sorted_dates)//2:])
+        if first_half > 0:
+            growth_rate = second_half / first_half
+
+    analysis = ask_gatekeeper(f"""NARRATIVE TRACKING: "{phrase}"
+
+Period: last {days} days
+Total articles using this phrase: {len(article_list)}
+
+TIMELINE:
+{json.dumps(sorted_dates[:30])}
+
+SOURCES USING THIS PHRASE:
+{json.dumps(source_counts.most_common(15))}
+
+Growth rate (2nd half / 1st half): {growth_rate:.2f}x
+(>2.0 suggests amplification campaign, <0.5 suggests dying narrative)
+
+SAMPLE ARTICLES:
+{chr(10).join(f"- {a.get('title', '')} ({a.get('source', '')}, {a.get('date', '')[:10]})" for a in article_list[:10])}
+
+ANALYZE:
+1. Is this phrase being amplified? By whom?
+2. What is the trajectory -- growing, stable, or declining?
+3. Did this phrase originate from a specific source (think tank, PR firm, politician)?
+4. Has the meaning or context of this phrase shifted over time?
+5. Is this phrase being used to frame an issue in a specific way?
+6. Who benefits from this narrative becoming widespread?""")
+
+    return {
+        "phrase": phrase,
+        "days": days,
+        "total_articles": len(article_list),
+        "source_distribution": [{"source": s, "count": c} for s, c in source_counts.most_common(15)],
+        "timeline": sorted_dates,
+        "growth_rate": round(growth_rate, 2),
+        "timeline_data": timeline.get("timeline", []),
+        "sample_articles": [{"url": a.get("url", ""), "title": a.get("title", ""), "source": a.get("source", "")} for a in article_list[:10]],
+        "ai_analysis": analysis,
+    }
+
+
+def analyze_source(source_name):
+    """Analyze a media source, think tank, or PR entity's narrative output."""
+    # Search for articles from/about this source
+    articles = gdelt_search(source_name, days=90, max_records=50)
+
+    article_list = articles.get("articles", []) if "error" not in articles else []
+
+    # Collect topic distribution
+    all_titles = " ".join(a.get("title", "") for a in article_list)
+    topic_phrases = extract_key_phrases(all_titles, top_n=20)
+
+    # Tone analysis
+    tones = [float(a.get("tone", 0)) for a in article_list if a.get("tone")]
+    avg_tone = sum(tones) / len(tones) if tones else 0
+
+    analysis = ask_gatekeeper(f"""SOURCE/ENTITY ANALYSIS: {source_name}
+
+RECENT MEDIA PRESENCE (last 90 days):
+Articles found: {len(article_list)}
+Average tone: {avg_tone:.2f}
+
+TOP TOPICS: {json.dumps(topic_phrases[:15])}
+
+SAMPLE ARTICLES:
+{chr(10).join(f"- {a.get('title', '')} ({a.get('source', '')}, {a.get('date', '')[:10]})" for a in article_list[:10])}
+
+ANALYZE:
+1. What type of entity is this? (news outlet, think tank, PR firm, trade association, activist group)
+2. What is their ideological orientation?
+3. Who funds them? (if known)
+4. What narratives do they consistently push?
+5. How do they frame issues? What language patterns do they use?
+6. Are they cited as independent experts when they actually have conflicts of interest?
+7. What is their media strategy (op-eds, press releases, social media, events)?
+8. Credibility/independence score: 1 (pure propaganda arm) to 10 (genuinely independent)
+9. How often are they cited by mainstream media without disclosing their funding/interests?""")
+
+    return {
+        "source": source_name,
+        "articles_found": len(article_list),
+        "average_tone": round(avg_tone, 2),
+        "top_topics": topic_phrases,
+        "sample_articles": [{"url": a.get("url", ""), "title": a.get("title", "")} for a in article_list[:10]],
+        "ai_analysis": analysis,
+    }
+
+
+def framing_analysis(topic, texts):
+    """Compare how different sources frame the same topic."""
+    if not texts or len(texts) < 2:
+        return {"error": "Need at least 2 texts to compare framing.", "error_code": "INVALID_INPUT"}
+
+    # Extract key phrases and fingerprints from each text
+    processed = []
+    for i, text in enumerate(texts[:10]):
+        if isinstance(text, dict):
+            actual_text = text.get("text", "")
+            source = text.get("source", f"source_{i}")
+        else:
+            actual_text = str(text)
+            source = f"source_{i}"
+
+        key_phrases = extract_key_phrases(actual_text)
+        processed.append({
+            "source": source,
+            "text_excerpt": actual_text[:1000],
+            "key_phrases": key_phrases[:10],
+        })
+
+    # AI framing comparison
+    texts_formatted = "\n\n".join(
+        f"SOURCE {p['source']}:\nKey phrases: {', '.join(p['key_phrases'][:8])}\nExcerpt: {p['text_excerpt'][:500]}"
+        for p in processed
+    )
+
+    analysis = ask_gatekeeper(f"""FRAMING ANALYSIS: "{topic}"
+
+Comparing {len(processed)} different framings of this topic:
+
+{texts_formatted}
+
+COMPARATIVE FRAMING ANALYSIS:
+1. How does each source frame this topic? What is the dominant metaphor or narrative?
+2. What are the key differences in framing between sources?
+3. Whose interests does each framing serve?
+4. What facts or perspectives are emphasized vs. minimized in each version?
+5. Are any of these framings clearly aligned with corporate/political interests?
+6. Which framing is most honest/complete? Which is most misleading?
+7. Are any of these framings suspiciously similar to PR talking points?
+8. What would a truly balanced framing of this topic look like?""",
+        max_tokens=3000,
+    )
+
+    return {
+        "topic": topic,
+        "sources_compared": len(processed),
+        "framings": processed,
+        "ai_analysis": analysis,
+    }
+
+
+def think_tank_trace(claim):
+    """Trace a claim back to its likely think tank or PR origin."""
+    # Search for articles containing this claim
+    articles = gdelt_search(f'"{claim}"', days=180, max_records=30)
+    article_list = articles.get("articles", []) if "error" not in articles else []
+
+    # Sort by date to find earliest usage
+    article_list.sort(key=lambda a: a.get("date", ""))
+
+    # Source analysis
+    sources = [a.get("source", "") for a in article_list]
+    source_counts = Counter(sources)
+
+    analysis = ask_gatekeeper(f"""THINK TANK / PR ORIGIN TRACE: "{claim}"
+
+EARLIEST APPEARANCES (chronological):
+{chr(10).join(f"- {a.get('date', '')[:10]} | {a.get('source', '')} | {a.get('title', '')}" for a in article_list[:15])}
+
+SOURCES USING THIS CLAIM:
+{json.dumps(source_counts.most_common(10))}
+
+TRACE THE ORIGIN:
+1. Where did this claim first appear?
+2. Is the originating source a think tank, trade association, PR firm, or political entity?
+3. Who funds the originating entity?
+4. How did this claim spread? Through what channels?
+5. Was it placed as an op-ed, cited in news articles, or spread through social media?
+6. Is the claim factually accurate? If not, what is it distorting?
+7. What policy or business outcome does this claim support?
+8. Who benefits from widespread belief in this claim?
+9. Has this claim been debunked or fact-checked?
+10. Map the likely influence chain: funder -> think tank -> PR distribution -> media placement""")
+
+    return {
+        "claim": claim,
+        "articles_found": len(article_list),
+        "earliest_articles": [
+            {"date": a.get("date", ""), "source": a.get("source", ""), "title": a.get("title", ""), "url": a.get("url", "")}
+            for a in article_list[:10]
+        ],
+        "source_distribution": [{"source": s, "count": c} for s, c in source_counts.most_common(10)],
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
+
+def emit_error(msg, code="INVALID_INPUT"):
+    json.dump({"error": msg, "error_code": code}, sys.stdout, indent=2)
+    sys.exit(1)
+
+
+def main():
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            emit_error("No input provided. Send JSON with an 'action' field on stdin.", "MISSING_FIELD")
+        input_data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        emit_error(f"Invalid JSON input: {e}", "INVALID_INPUT")
+
+    action = input_data.get("action", "")
+    if not action:
+        emit_error(
+            "Missing 'action' field. Valid actions: analyze_article, compare_articles, "
+            "detect_campaign, track_narrative, source_analysis, framing_analysis, "
+            "timeline, think_tank_trace",
+            "MISSING_FIELD",
+        )
+
+    if action == "analyze_article":
+        result = analyze_article(
+            url=input_data.get("url", ""),
+            text=input_data.get("text", ""),
+        )
+
+    elif action == "compare_articles":
+        articles = input_data.get("articles", [])
+        if not articles:
+            emit_error("'compare_articles' requires an 'articles' list.", "MISSING_FIELD")
+        result = compare_articles(articles)
+
+    elif action == "detect_campaign":
+        topic = input_data.get("topic", "")
+        if not topic:
+            emit_error("'detect_campaign' requires a 'topic' field.", "MISSING_FIELD")
+        result = detect_campaign(topic, days=input_data.get("days", 7))
+
+    elif action == "track_narrative":
+        phrase = input_data.get("phrase", "")
+        if not phrase:
+            emit_error("'track_narrative' requires a 'phrase' field.", "MISSING_FIELD")
+        result = track_narrative(phrase, days=input_data.get("days", 30))
+
+    elif action == "source_analysis":
+        source = input_data.get("source", "")
+        if not source:
+            emit_error("'source_analysis' requires a 'source' field.", "MISSING_FIELD")
+        result = analyze_source(source)
+
+    elif action == "framing_analysis":
+        topic = input_data.get("topic", "")
+        texts = input_data.get("texts", [])
+        if not topic:
+            emit_error("'framing_analysis' requires a 'topic' field.", "MISSING_FIELD")
+        if not texts:
+            emit_error("'framing_analysis' requires a 'texts' list.", "MISSING_FIELD")
+        result = framing_analysis(topic, texts)
+
+    elif action == "timeline":
+        topic = input_data.get("topic", "")
+        if not topic:
+            emit_error("'timeline' requires a 'topic' field.", "MISSING_FIELD")
+        result = detect_campaign(topic, days=input_data.get("days", 14))
+
+    elif action == "think_tank_trace":
+        claim = input_data.get("claim", "")
+        if not claim:
+            emit_error("'think_tank_trace' requires a 'claim' field.", "MISSING_FIELD")
+        result = think_tank_trace(claim)
+
+    else:
+        emit_error(
+            f"Unknown action: '{action}'. Valid actions: analyze_article, compare_articles, "
+            "detect_campaign, track_narrative, source_analysis, framing_analysis, "
+            "timeline, think_tank_trace",
+            "UNKNOWN_ACTION",
+        )
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
