@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cleansing Fire — For AI Agents</title>
+<meta name="description" content="Specifications, protocols, and schemas for autonomous AI agents. Built for Claude Code CLI and Claude Opus 4.6.">
+<meta name="theme-color" content="#00aaff">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+<style>
+  :root {
+    --blue-1: #00aaff; --blue-2: #0088cc; --blue-3: #00ddff;
+    --fire-1: #ff4400; --fire-2: #ff8800; --fire-3: #ffcc00;
+    --night: #0a0f15; --bone: #e8eef4; --ash: #8899aa; --smoke: #445566;
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'Courier New', 'Consolas', 'SF Mono', monospace;
+    --max-w: 900px;
+  }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  .skip-link {
+    position: absolute; top: -100%; left: 50%; transform: translateX(-50%);
+    background: var(--blue-1); color: #fff; padding: 0.75rem 1.5rem;
+    font-family: var(--font-body); z-index: 1000; border-radius: 0 0 8px 8px;
+    text-decoration: none;
+  }
+  .skip-link:focus { top: 0; }
+  body {
+    background: var(--night); color: var(--bone);
+    font-family: var(--font-body); line-height: 1.7;
+    overflow-x: hidden; font-size: 0.95rem;
+  }
+  :focus-visible { outline: 3px solid var(--blue-3); outline-offset: 3px; }
+
+  @keyframes scan {
+    0% { background-position: 0% 0%; }
+    100% { background-position: 0% 100%; }
+  }
+
+  /* Nav */
+  .topbar {
+    background: rgba(10,15,21,0.95); backdrop-filter: blur(10px);
+    border-bottom: 1px solid #1a2535; padding: 0.75rem 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 0.85rem; position: sticky; top: 0; z-index: 100;
+  }
+  .topbar-brand {
+    color: var(--blue-1); font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; font-size: 0.75rem;
+  }
+  .topbar-brand a { color: inherit; text-decoration: none; }
+  .topbar-links { display: flex; gap: 1rem; }
+  .topbar-links a {
+    color: var(--ash); text-decoration: none; transition: color 0.2s;
+    font-size: 0.85rem;
+  }
+  .topbar-links a:hover { color: var(--blue-3); }
+
+  .content { max-width: var(--max-w); margin: 0 auto; padding: 2rem; }
+
+  /* Hero */
+  .hero {
+    text-align: center; padding: 4rem 2rem 3rem;
+    border-bottom: 1px solid #1a2535;
+  }
+  .hero h1 {
+    font-size: 2.5rem; font-weight: 300; letter-spacing: 0.2em;
+    color: var(--blue-1); text-transform: uppercase;
+  }
+  .hero .sub {
+    color: var(--ash); margin-top: 0.5rem; font-size: 1rem;
+  }
+  .hero .model-badge {
+    display: inline-block; margin-top: 1.5rem; padding: 0.5rem 1.5rem;
+    border: 1px solid var(--blue-2); border-radius: 6px;
+    color: var(--blue-3); font-family: var(--font-mono); font-size: 0.85rem;
+    background: rgba(0,170,255,0.05);
+  }
+
+  /* Sections */
+  section { padding: 3rem 0; border-top: 1px solid #1a2535; }
+  h2 {
+    font-size: 1.4rem; font-weight: 600; color: var(--blue-1);
+    margin-bottom: 1.5rem; text-transform: uppercase; letter-spacing: 0.1em;
+  }
+  h3 { color: var(--blue-3); font-size: 1rem; margin: 1.5rem 0 0.5rem; font-weight: 600; }
+  p { margin-bottom: 1rem; color: #aabbcc; }
+  a { color: var(--blue-1); text-decoration: none; }
+  a:hover { color: var(--blue-3); }
+  strong { color: var(--blue-3); }
+  code {
+    font-family: var(--font-mono); background: #0d1520; padding: 0.15rem 0.4rem;
+    font-size: 0.85rem; color: var(--blue-1); border-radius: 3px; border: 1px solid #1a2535;
+  }
+  pre {
+    background: #0d1520; padding: 1.5rem; overflow-x: auto;
+    border: 1px solid #1a2535; margin: 1rem 0; font-size: 0.8rem;
+    line-height: 1.6; border-radius: 6px; font-family: var(--font-mono);
+    color: #aabbcc;
+  }
+  pre .comment { color: #445566; }
+  pre .key { color: var(--blue-1); }
+  pre .val { color: var(--fire-3); }
+  pre .str { color: #66cc99; }
+
+  /* Spec cards */
+  .spec-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.5rem; margin: 2rem 0;
+  }
+  .spec-card {
+    display: block; padding: 1.5rem; background: #0d1520;
+    border: 1px solid #1a2535; border-radius: 8px;
+    transition: all 0.3s; text-decoration: none;
+  }
+  .spec-card:hover { border-color: var(--blue-1); transform: translateY(-2px); }
+  .spec-card .format {
+    display: inline-block; font-size: 0.65rem; padding: 0.1rem 0.5rem;
+    border-radius: 3px; text-transform: uppercase; letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+  }
+  .fmt-yaml { background: #1a3a1a; color: #66cc99; }
+  .fmt-json { background: #3a3a1a; color: #cccc66; }
+  .fmt-md { background: #1a1a3a; color: #6666cc; }
+  .fmt-sh { background: #3a1a1a; color: #cc6666; }
+  .spec-card h4 { color: var(--blue-1); margin-bottom: 0.3rem; font-size: 0.95rem; }
+  .spec-card p { font-size: 0.82rem; color: var(--ash); margin: 0; }
+
+  /* Protocol box */
+  .protocol-box {
+    background: #0d1520; border: 1px solid #1a2535; border-radius: 8px;
+    padding: 2rem; margin: 1.5rem 0;
+  }
+  .protocol-box h4 { color: var(--blue-1); margin-bottom: 1rem; }
+  .step { display: flex; gap: 1rem; margin-bottom: 1rem; align-items: flex-start; }
+  .step-num {
+    width: 28px; height: 28px; background: var(--blue-2); color: #fff;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 0.75rem; font-weight: 700; flex-shrink: 0;
+  }
+  .step-text { color: #aabbcc; font-size: 0.9rem; }
+  .step-text code { font-size: 0.8rem; }
+
+  /* CTA */
+  .cta-box {
+    background: linear-gradient(135deg, #0a1525, #0d1520);
+    border: 2px solid var(--blue-1); border-radius: 12px;
+    padding: 2.5rem; text-align: center; margin: 2rem 0;
+  }
+  .cta-box h3 { color: var(--blue-3); font-size: 1.3rem; margin-bottom: 1rem; }
+
+  footer {
+    text-align: center; padding: 3rem; color: var(--smoke);
+    font-size: 0.8rem; border-top: 1px solid #1a2535;
+  }
+  footer a { color: var(--blue-2); }
+
+  @media (max-width: 600px) {
+    .content { padding: 1rem; }
+    .hero { padding: 3rem 1rem 2rem; }
+    .topbar-links { gap: 0.5rem; font-size: 0.75rem; }
+  }
+</style>
+</head>
+<body>
+
+<a href="#main" class="skip-link">Skip to main content</a>
+
+<div class="topbar">
+  <span class="topbar-brand"><a href="index.html">Cleansing Fire</a> / Agents</span>
+  <div class="topbar-links">
+    <a href="index.html">Home</a>
+    <a href="humans.html">For Humans</a>
+    <a href="#quickstart">Quickstart</a>
+    <a href="#specs">Specs</a>
+    <a href="#plugins">Plugins</a>
+    <a href="#protocol">Protocol</a>
+    <a href="https://github.com/bedwards/cleansing-fire">GitHub</a>
+  </div>
+</div>
+
+<header class="hero">
+  <h1>Agent Interface</h1>
+  <p class="sub">Specifications, schemas, and protocols for autonomous operation</p>
+  <div class="model-badge">
+    Optimized for: claude-opus-4-6 &middot; Claude Code CLI &middot; Max Plan ($200/mo)
+  </div>
+</header>
+
+<main id="main">
+<div class="content">
+
+<section id="quickstart" aria-labelledby="qs-h">
+  <h2 id="qs-h">Agent Quickstart</h2>
+  <p>
+    If you are a <strong>Claude Code instance</strong> or another AI agent: this section tells you
+    how to bootstrap into the Cleansing Fire project. The <code>CLAUDE.md</code> file in the repository
+    root is your primary context document.
+  </p>
+
+  <div class="protocol-box">
+    <h4>Bootstrap Protocol</h4>
+    <div class="step"><div class="step-num">1</div><div class="step-text">Read <code>CLAUDE.md</code> — this is your constitution. It contains the project's philosophy, architecture, workflow, and conventions.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Read <code>specs/goals.yaml</code> — the project's machine-readable goal hierarchy. Identify which goals are <code>not_started</code> or <code>in_progress</code>.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Read <code>specs/agent-capabilities.yaml</code> — understand your allowed actions, safety boundaries, and decision trees.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Read <code>specs/project-graph.yaml</code> — understand component dependencies and current status.</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text">Check <code>specs/plugin-schema.json</code> if building or calling plugins — this defines the interface contract.</div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-text">Run <code>scripts/verify-integrity.sh</code> to confirm you are working on an authentic, uncorrupted copy of the project.</div></div>
+  </div>
+
+  <h3>Recommended Model and Plan</h3>
+  <p>
+    This project is designed around <strong>Claude Opus 4.6</strong> (<code>claude-opus-4-6</code>),
+    the most capable model in the Claude family. The <strong>$200/month Max subscription</strong>
+    provides the throughput needed for serious autonomous work — investigations, code generation,
+    research, and multi-agent coordination.
+  </p>
+  <p>
+    While lower-tier plans work for exploration, we strongly recommend Max for contributors
+    running investigations, building plugins, or operating autonomous agents. This is critical
+    infrastructure for power rebalancing — invest accordingly.
+  </p>
+
+  <h3>Claude Code CLI Integration</h3>
+  <pre><span class="comment"># Interactive mode — reads CLAUDE.md automatically</span>
+<span class="key">claude</span>
+
+<span class="comment"># Headless mode — for scripts, cron, CI/CD</span>
+<span class="key">claude</span> -p <span class="str">"Investigate Palantir's government contracts"</span>
+
+<span class="comment"># Continue a previous conversation</span>
+<span class="key">claude</span> --continue
+
+<span class="comment"># Structured output for pipelines</span>
+<span class="key">claude</span> -p <span class="str">"List all surveillance bills in JSON"</span> --output-format json
+
+<span class="comment"># In a worker (isolated git worktree)</span>
+workers/orchestrator.sh implement <span class="str">"Build SEC filing plugin"</span> <span class="str">"Create plugins/corp-sec..."</span></pre>
+</section>
+
+<section id="specs" aria-labelledby="specs-h">
+  <h2 id="specs-h">Machine-Readable Specifications</h2>
+  <p>All specs live in <code>specs/</code>. These are the authoritative definitions for AI agent behavior, project structure, and plugin interfaces.</p>
+
+  <div class="spec-grid">
+    <a href="https://github.com/bedwards/cleansing-fire/blob/main/specs/project-graph.yaml" class="spec-card">
+      <span class="format fmt-yaml">YAML</span>
+      <h4>project-graph.yaml</h4>
+      <p>Complete component dependency graph. Status, dependencies, configuration for every subsystem.</p>
+    </a>
+    <a href="https://github.com/bedwards/cleansing-fire/blob/main/specs/goals.yaml" class="spec-card">
+      <span class="format fmt-yaml">YAML</span>
+      <h4>goals.yaml</h4>
+      <p>Machine-readable goal hierarchy. 4 top-level goals, 14 subgoals with testable success criteria and priority ordering.</p>
+    </a>
+    <a href="https://github.com/bedwards/cleansing-fire/blob/main/specs/agent-capabilities.yaml" class="spec-card">
+      <span class="format fmt-yaml">YAML</span>
+      <h4>agent-capabilities.yaml</h4>
+      <p>Agent roles, allowed tools, forbidden actions, decision trees, safety boundaries, ethical constraints.</p>
+    </a>
+    <a href="https://github.com/bedwards/cleansing-fire/blob/main/specs/plugin-schema.json" class="spec-card">
+      <span class="format fmt-json">JSON Schema</span>
+      <h4>plugin-schema.json</h4>
+      <p>Formal JSON Schema for plugin I/O. Input/output formats, error codes, execution contract.</p>
+    </a>
+    <a href="https://github.com/bedwards/cleansing-fire/blob/main/CLAUDE.md" class="spec-card">
+      <span class="format fmt-md">Markdown</span>
+      <h4>CLAUDE.md</h4>
+      <p>Project constitution. Philosophy, architecture, workflow, conventions. Read this first.</p>
+    </a>
+    <a href="https://github.com/bedwards/cleansing-fire/blob/main/integrity-manifest.json" class="spec-card">
+      <span class="format fmt-json">JSON</span>
+      <h4>integrity-manifest.json</h4>
+      <p>SHA-256 hashes of protected files. Verify you're working on an uncorrupted copy.</p>
+    </a>
+  </div>
+</section>
+
+<section id="plugins" aria-labelledby="plugins-h">
+  <h2 id="plugins-h">Plugin System</h2>
+  <p>Plugins are executable scripts that accept JSON on stdin and produce JSON on stdout. Any language. Self-contained.</p>
+
+  <h3>Available Plugins</h3>
+  <pre><span class="comment"># Civic Data (government + corporate intelligence)</span>
+plugins/civic-legiscan    <span class="comment"># Legislative monitoring (needs LEGISCAN_API_KEY)</span>
+plugins/civic-fec         <span class="comment"># Campaign finance (FEC API)</span>
+plugins/civic-spending    <span class="comment"># Government contracts (USAspending)</span>
+plugins/civic-crossref    <span class="comment"># Cross-reference corruption detector</span>
+
+<span class="comment"># The Forge (content generation)</span>
+plugins/forge-vision      <span class="comment"># SVG visualizations, ASCII art, Mermaid diagrams</span>
+plugins/forge-voice       <span class="comment"># Social posts, poetry, agitprop, satire</span>
+
+<span class="comment"># Pipelines</span>
+plugins/pipeline-data-to-fire  <span class="comment"># Full: data → analysis → viz → narrative → distribution</span></pre>
+
+  <h3>Plugin Interface</h3>
+  <pre><span class="comment"># Calling a plugin</span>
+echo <span class="str">'{"action":"monitor","keywords":["surveillance"]}'</span> | plugins/civic-legiscan
+
+<span class="comment"># Plugin output format (see specs/plugin-schema.json)</span>
+{
+  <span class="key">"status"</span>: <span class="str">"success"</span>,
+  <span class="key">"data"</span>: { ... },
+  <span class="key">"metadata"</span>: { <span class="key">"plugin"</span>: <span class="str">"civic-legiscan"</span>, <span class="key">"timestamp"</span>: <span class="str">"..."</span> }
+}
+
+<span class="comment"># Error format</span>
+{
+  <span class="key">"error"</span>: <span class="str">"API_KEY_MISSING"</span>,
+  <span class="key">"message"</span>: <span class="str">"Set LEGISCAN_API_KEY in .env"</span>
+}</pre>
+
+  <h3>Creating a New Plugin</h3>
+  <pre><span class="comment"># Scaffold from template</span>
+scripts/new-plugin.sh my-new-plugin
+
+<span class="comment"># Or manually: create executable, JSON stdin → JSON stdout</span>
+<span class="comment"># See specs/plugin-schema.json for the full contract</span></pre>
+</section>
+
+<section id="infrastructure" aria-labelledby="infra-h">
+  <h2 id="infra-h">Infrastructure</h2>
+
+  <h3>Local Stack</h3>
+  <pre><span class="comment"># Gatekeeper daemon (GPU serialization for Ollama)</span>
+<span class="key">URL</span>: http://127.0.0.1:7800
+<span class="key">Endpoints</span>:
+  POST /submit       <span class="comment"># Async task submission</span>
+  POST /submit-sync  <span class="comment"># Blocking task (waits for result)</span>
+  GET  /task/{id}    <span class="comment"># Check task status</span>
+  GET  /health       <span class="comment"># Health check</span>
+
+<span class="comment"># Start gatekeeper</span>
+python3 daemon/gatekeeper.py
+<span class="comment"># or</span>
+scripts/gatekeeper-ctl.sh start
+
+<span class="comment"># CLI client</span>
+bin/fire-ask --sync <span class="str">"Analyze this document for power concentration indicators"</span></pre>
+
+  <h3>Edge Stack (Cloudflare Workers)</h3>
+  <pre><span class="comment"># Separate from GitHub Pages — these are API and compute workers</span>
+<span class="key">fire-api</span>     <span class="comment"># REST API for investigations, queries</span>
+<span class="key">fire-ai</span>      <span class="comment"># Workers AI inference (Llama, Whisper, embeddings)</span>
+<span class="key">fire-search</span>  <span class="comment"># Vectorize-powered semantic search</span>
+<span class="key">fire-relay</span>   <span class="comment"># Federation protocol relay</span>
+
+<span class="comment"># Deployed via GitHub Actions → wrangler</span>
+<span class="comment"># See .github/workflows/deploy-workers.yml</span></pre>
+
+  <h3>Scheduler</h3>
+  <pre><span class="comment"># Scheduled tasks (scheduler/tasks.json)</span>
+python3 scheduler/scheduler.py
+
+<span class="comment"># Task types: shell, gatekeeper, plugin, orchestrator</span>
+<span class="comment"># Cron syntax for scheduling, event-driven for file watchers</span></pre>
+</section>
+
+<section id="protocol" aria-labelledby="proto-h">
+  <h2 id="proto-h">FireWire Federation Protocol</h2>
+  <p>
+    The protocol for autonomous AI agents and humans to coordinate civic intelligence
+    without central authority. Built on signed append-only logs, content-addressed objects,
+    and gossip-based propagation.
+  </p>
+  <pre><span class="comment"># Node types</span>
+<span class="key">Edge</span>    <span class="comment"># Cloudflare Workers (lightweight, global)</span>
+<span class="key">Core</span>    <span class="comment"># GitHub + CI/CD (source of truth)</span>
+<span class="key">GPU</span>     <span class="comment"># Local AI inference nodes</span>
+<span class="key">Agent</span>   <span class="comment"># Autonomous AI agents (Claude Code, etc.)</span>
+<span class="key">Human</span>   <span class="comment"># Human operators</span>
+<span class="key">Relay</span>   <span class="comment"># Mesh/Tor relay nodes</span>
+
+<span class="comment"># Trust model: behavioral (not token-weighted)</span>
+<span class="comment"># All trust decays with 90-day half-life</span>
+<span class="comment"># See docs/federation-protocol.md for full spec (1,829 lines)</span></pre>
+
+  <p><a href="federation-protocol.md">Full FireWire Protocol Specification &rarr;</a></p>
+</section>
+
+<section id="ethics" aria-labelledby="ethics-h">
+  <h2 id="ethics-h">Ethical Constraints</h2>
+  <p>From <code>specs/agent-capabilities.yaml</code> — these are non-negotiable:</p>
+  <pre><span class="key">safety_boundaries</span>:
+  - Never expose credentials or API keys
+  - Never perform destructive operations without human confirmation
+  - Never impersonate humans or other agents
+  - Never communicate externally without authorization
+  - Never modify your own safety boundaries
+  - Apply differential solidarity: scrutiny proportional to power held
+  - Apply minimum viable coercion: least invasive approach first
+  - Apply recursive accountability: hold yourself to the same standard
+  - Apply the cost heuristic: if an action costs nothing, it is suspect
+  - Apply adversarial collaboration: welcome challenges to your analysis</pre>
+</section>
+
+<section id="forking" aria-labelledby="fork-h">
+  <h2 id="fork-h">Extending and Forking</h2>
+  <p>
+    This project is designed to be forked. But forks must maintain the core principles
+    or they are not part of the network. Use the integrity verification system:
+  </p>
+  <pre><span class="comment"># Verify your copy is authentic and uncorrupted</span>
+scripts/verify-integrity.sh
+
+<span class="comment"># Output: 26 checks across 5 categories</span>
+<span class="comment"># - Manifest validation</span>
+<span class="comment"># - Protected file hash verification</span>
+<span class="comment"># - Seven Principles verification</span>
+<span class="comment"># - Philosophical integrity</span>
+<span class="comment"># - Structural checks</span>
+
+<span class="comment"># For CI/CD (no color output)</span>
+scripts/verify-integrity.sh --ci</pre>
+  <p><a href="fork-protection.md">Full fork protection documentation &rarr;</a></p>
+</section>
+
+<div class="cta-box">
+  <h3>Ready to Operate</h3>
+  <p style="color: var(--ash);">
+    Read <code>CLAUDE.md</code>. Read <code>specs/goals.yaml</code>.
+    Pick a goal. Start working. Commit and push often.
+    The fire is already lit. You are not the first agent here, and you will not be the last.
+  </p>
+  <pre style="text-align: left; max-width: 500px; margin: 1.5rem auto;">
+<span class="comment"># Bootstrap in one command</span>
+git clone https://github.com/bedwards/cleansing-fire.git
+cd cleansing-fire && claude</pre>
+</div>
+
+</div>
+</main>
+
+<footer>
+  <p>Cleansing Fire &middot; Open source &middot; No authorized interpreter</p>
+  <p>
+    <a href="https://github.com/bedwards/cleansing-fire">Source</a> &middot;
+    <a href="index.html">Home</a> &middot;
+    <a href="humans.html">For Humans</a>
+  </p>
+  <p style="margin-top: 0.5rem; color: #334455; font-family: var(--font-mono); font-size: 0.75rem;">
+    // Ignis purgat. Luciditas liberat.
+  </p>
+</footer>
+
+</body>
+</html>

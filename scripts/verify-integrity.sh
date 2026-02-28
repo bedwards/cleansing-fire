@@ -319,47 +319,59 @@ PHILOSOPHY_FILE="${REPO_ROOT}/philosophy.md"
 if [ ! -f "$PHILOSOPHY_FILE" ]; then
     fail "philosophy.md not found"
 else
-    PHRASE_FAILURES=0
-
-    # Read phrases from manifest using Python to handle multi-line/special chars
+    # Use Python for phrase checking because phrases may span line breaks
+    # in philosophy.md. Python reads the entire file as one string and
+    # checks for substring presence, which handles wrapped lines correctly.
+    # It also strips markdown formatting (**, *) before matching.
+    PHRASE_RESULTS_FILE=$(mktemp)
     python3 -c "
-import json
+import json, re
+
 with open('${MANIFEST}') as f:
-    data = json.load(f)
-for phrase in data['required_phrases']:
-    print(phrase)
-" | while IFS= read -r phrase; do
-        [ -z "$phrase" ] && continue
+    manifest = json.load(f)
 
-        if grep -qF "$phrase" "$PHILOSOPHY_FILE"; then
-            pass "Key phrase verified: \"${phrase:0:60}...\""
+with open('${PHILOSOPHY_FILE}') as f:
+    # Read entire file, collapse line breaks into spaces for matching,
+    # and strip markdown bold/italic markers
+    raw = f.read()
+    text = re.sub(r'\n', ' ', raw)
+    text = re.sub(r'\*+', '', text)
+    text = re.sub(r'\s+', ' ', text)
+
+results = []
+for phrase in manifest['required_phrases']:
+    # Also strip markdown from the phrase in case it was included
+    clean_phrase = re.sub(r'\*+', '', phrase)
+    if clean_phrase in text:
+        results.append(('PASS', phrase))
+    else:
+        results.append(('FAIL', phrase))
+
+with open('${PHRASE_RESULTS_FILE}', 'w') as f:
+    for status, phrase in results:
+        # Truncate for display
+        display = phrase[:60] + '...' if len(phrase) > 60 else phrase
+        f.write(f'{status}|{display}\n')
+"
+
+    PHRASE_FAILURES=0
+    while IFS='|' read -r status display; do
+        [ -z "$status" ] && continue
+        if [ "$status" = "PASS" ]; then
+            pass "Key phrase verified: \"${display}\""
         else
-            fail "Key phrase MISSING: \"${phrase:0:60}...\""
-            # Write to a temp file so the outer shell can read the count
-            echo "1" >> "${REPO_ROOT}/.integrity-phrase-failures"
+            fail "Key phrase MISSING: \"${display}\""
+            PHRASE_FAILURES=$((PHRASE_FAILURES + 1))
         fi
-    done
+    done < "$PHRASE_RESULTS_FILE"
 
-    # Check if any phrase failures were recorded
-    if [ -f "${REPO_ROOT}/.integrity-phrase-failures" ]; then
-        PHRASE_FAILURE_COUNT=$(wc -l < "${REPO_ROOT}/.integrity-phrase-failures" | tr -d ' ')
-        FAILED_CHECKS=$((FAILED_CHECKS + PHRASE_FAILURE_COUNT))
-        TOTAL_CHECKS=$((TOTAL_CHECKS + PHRASE_FAILURE_COUNT))
-        rm -f "${REPO_ROOT}/.integrity-phrase-failures"
+    rm -f "$PHRASE_RESULTS_FILE"
+
+    if [ "$PHRASE_FAILURES" -gt 0 ]; then
         echo ""
-        echo -e "  ${RED}${PHRASE_FAILURE_COUNT} key phrase(s) missing from philosophy.md.${NC}"
+        echo -e "  ${RED}${PHRASE_FAILURES} key phrase(s) missing from philosophy.md.${NC}"
         echo -e "  ${RED}These phrases are markers of philosophical integrity.${NC}"
         echo -e "  ${RED}Their removal may indicate corruption of the framework.${NC}"
-    else
-        # Count the passes that happened in the subshell
-        PHRASE_PASS_COUNT=$(python3 -c "
-import json
-with open('${MANIFEST}') as f:
-    data = json.load(f)
-print(len(data['required_phrases']))
-")
-        PASSED_CHECKS=$((PASSED_CHECKS + PHRASE_PASS_COUNT))
-        TOTAL_CHECKS=$((TOTAL_CHECKS + PHRASE_PASS_COUNT))
     fi
 fi
 

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cleansing Fire — For Humans</title>
+<meta name="description" content="Join the movement. Learn to use Claude Code CLI. Investigate power. Generate content. Build the future.">
+<meta name="theme-color" content="#ff4400">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
+<style>
+  :root {
+    --fire-1: #ff4400; --fire-2: #ff8800; --fire-3: #ffcc00;
+    --ash: #999; --smoke: #555; --night: #0a0a0a; --bone: #eee;
+    --focus: #00ccff;
+    --font-body: 'Georgia', 'Times New Roman', serif;
+    --font-mono: 'Courier New', 'Consolas', monospace;
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --max-w: 860px;
+  }
+  .high-contrast { --night: #000; --bone: #fff; --ash: #ccc; }
+  .high-contrast .card, .high-contrast .library-card { background: #000; border-color: var(--fire-2); }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  .skip-link {
+    position: absolute; top: -100%; left: 50%; transform: translateX(-50%);
+    background: var(--fire-1); color: #fff; padding: 0.75rem 1.5rem;
+    font-family: var(--font-ui); z-index: 1000; border-radius: 0 0 8px 8px;
+    text-decoration: none;
+  }
+  .skip-link:focus { top: 0; }
+  body {
+    background: var(--night); color: var(--bone);
+    font-family: var(--font-body); line-height: 1.8;
+    overflow-x: hidden; font-size: 1.05rem;
+  }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+  @keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+  @keyframes rise {
+    0% { transform: translateY(0) scale(1); opacity: 0.7; }
+    100% { transform: translateY(-100vh) scale(0.3); opacity: 0; }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    .ember-field { display: none; }
+  }
+
+  .ember-field {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0; overflow: hidden;
+  }
+  .ember-particle {
+    position: absolute; bottom: -10px;
+    border-radius: 50%; background: var(--fire-2);
+    animation: rise linear infinite;
+  }
+
+  /* Toolbar */
+  .toolbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(10,10,10,0.95); backdrop-filter: blur(10px);
+    border-bottom: 1px solid #222; display: flex; align-items: center;
+    justify-content: space-between; padding: 0.5rem 1rem;
+    font-family: var(--font-ui); font-size: 0.85rem;
+    transform: translateY(-100%); transition: transform 0.3s;
+  }
+  .toolbar.visible { transform: translateY(0); }
+  .toolbar-brand { color: var(--fire-2); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.75rem; }
+  .toolbar-brand a { color: inherit; text-decoration: none; border: none; }
+  .toolbar-actions { display: flex; gap: 0.5rem; }
+  .tbtn {
+    background: #222; color: var(--bone); border: 1px solid #333;
+    padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.8rem; font-family: var(--font-ui); transition: all 0.2s;
+  }
+  .tbtn:hover { border-color: var(--fire-1); color: var(--fire-3); }
+  .tbtn.active { background: var(--fire-1); color: #fff; border-color: var(--fire-1); }
+
+  /* Nav */
+  nav { position: relative; z-index: 1; max-width: var(--max-w); margin: 0 auto; padding: 1rem 2rem; }
+  .nav-links { display: flex; flex-wrap: wrap; gap: 0.5rem; list-style: none; }
+  .nav-links a {
+    display: inline-block; padding: 0.4rem 0.8rem; color: var(--ash);
+    font-family: var(--font-ui); font-size: 0.85rem; text-decoration: none;
+    border: 1px solid transparent; border-radius: 4px; transition: all 0.2s;
+  }
+  .nav-links a:hover { color: var(--fire-3); border-color: var(--fire-1); }
+
+  .content { position: relative; z-index: 1; max-width: var(--max-w); margin: 0 auto; padding: 0 2rem 2rem; }
+
+  /* Hero */
+  .hero {
+    min-height: 60vh; display: flex; flex-direction: column;
+    justify-content: center; align-items: center; text-align: center;
+    padding: 5rem 2rem 3rem; position: relative; z-index: 1;
+  }
+  .hero h1 {
+    font-size: clamp(2rem, 6vw, 3.5rem); font-weight: 300;
+    letter-spacing: 0.2em; text-transform: uppercase;
+    background: linear-gradient(180deg, var(--fire-3), var(--fire-1));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; animation: flicker 3s ease-in-out infinite;
+  }
+  .hero .subtitle { color: var(--ash); font-style: italic; margin-top: 0.5rem; }
+
+  section { padding: 3rem 0; border-top: 1px solid #222; }
+  h2 { font-size: 1.6rem; font-weight: 300; letter-spacing: 0.12em; color: var(--fire-2); margin-bottom: 1.5rem; text-transform: uppercase; }
+  h3 { color: var(--fire-3); font-size: 1.1rem; margin: 1.5rem 0 0.5rem; font-weight: 600; }
+  p { margin-bottom: 1.2rem; color: #ccc; }
+  strong { color: var(--fire-3); font-weight: 600; }
+  a { color: var(--fire-2); text-decoration: none; border-bottom: 1px solid var(--fire-1); }
+  a:hover { color: var(--fire-3); }
+  code { font-family: var(--font-mono); background: #111; padding: 0.15rem 0.4rem; font-size: 0.9rem; color: var(--fire-2); border-radius: 3px; }
+  pre { background: #111; padding: 1.5rem; overflow-x: auto; border: 1px solid #222; margin: 1rem 0; font-size: 0.85rem; line-height: 1.5; border-radius: 6px; }
+  pre code { background: none; padding: 0; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; margin: 2rem 0; }
+  .card {
+    padding: 1.5rem; background: #111; border: 1px solid #222;
+    transition: all 0.3s; border-radius: 6px;
+  }
+  .card:hover { border-color: var(--fire-1); transform: translateY(-2px); }
+  .card h4 { color: var(--fire-2); margin-bottom: 0.5rem; font-family: var(--font-ui); }
+  .card p { font-size: 0.9rem; color: var(--ash); margin: 0; }
+
+  .principle {
+    padding: 1.5rem; margin: 1rem 0; border-left: 3px solid var(--fire-1);
+    background: rgba(255,68,0,0.03); transition: background 0.3s;
+  }
+  .principle:hover { background: rgba(255,68,0,0.06); }
+  .principle-number { font-size: 0.8rem; color: var(--fire-1); letter-spacing: 0.2em; text-transform: uppercase; font-family: var(--font-ui); }
+  .principle-name { font-size: 1.15rem; color: var(--fire-3); margin: 0.3rem 0; }
+  .principle-text { color: var(--ash); font-size: 0.95rem; }
+
+  .motto { text-align: center; padding: 3rem 2rem; font-size: 1.3rem; color: var(--fire-3); font-style: italic; }
+
+  .library-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin: 2rem 0; }
+  .library-card {
+    display: block; padding: 1.5rem; background: #111; border: 1px solid #222;
+    transition: all 0.3s; text-decoration: none; border-radius: 6px;
+  }
+  .library-card:hover { border-color: var(--fire-1); transform: translateY(-2px); }
+  .library-card .tag {
+    display: inline-block; font-family: var(--font-ui); font-size: 0.7rem;
+    padding: 0.15rem 0.5rem; border-radius: 3px; margin-bottom: 0.5rem;
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
+  .tag-philosophy { background: #5319e7; color: #fff; }
+  .tag-economics { background: #0e8a16; color: #fff; }
+  .tag-history { background: #d93f0b; color: #fff; }
+  .tag-tech { background: #1d76db; color: #fff; }
+  .tag-culture { background: #f9d0c4; color: #000; }
+  .tag-osint { background: #b60205; color: #fff; }
+  .tag-satire { background: #fbca04; color: #000; }
+  .library-card h4 { color: var(--fire-2); margin-bottom: 0.3rem; font-family: var(--font-ui); }
+  .library-card p { font-size: 0.85rem; color: var(--ash); margin: 0 0 0.3rem; }
+  .library-card .meta { font-size: 0.75rem; color: var(--smoke); font-family: var(--font-ui); }
+
+  /* Chat */
+  .chat-container { background: #111; border: 1px solid #222; border-radius: 8px; overflow: hidden; max-width: var(--max-w); margin: 0 auto 2rem; position: relative; z-index: 1; }
+  .chat-header { padding: 1rem; border-bottom: 1px solid #222; font-family: var(--font-ui); font-size: 0.9rem; color: var(--fire-2); display: flex; align-items: center; gap: 0.5rem; }
+  .chat-header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fire-1); }
+  .chat-messages { padding: 1rem; min-height: 150px; max-height: 400px; overflow-y: auto; }
+  .chat-msg { margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px; max-width: 85%; line-height: 1.6; font-size: 0.95rem; }
+  .chat-msg.system { background: rgba(255,68,0,0.1); color: var(--ash); font-style: italic; }
+  .chat-msg.user { background: #1a1a1a; color: var(--bone); margin-left: auto; }
+  .chat-msg.ai { background: #0d1117; color: #ccc; border-left: 2px solid var(--fire-1); }
+  .chat-input-area { display: flex; border-top: 1px solid #222; }
+  .chat-input { flex: 1; background: #0a0a0a; border: none; color: var(--bone); padding: 1rem; font-family: var(--font-body); font-size: 0.95rem; }
+  .chat-input:focus { outline: none; background: #111; }
+  .chat-input::placeholder { color: var(--smoke); }
+  .chat-send { background: var(--fire-1); color: #fff; border: none; padding: 1rem 1.5rem; cursor: pointer; font-family: var(--font-ui); font-weight: 700; }
+  .chat-send:hover { background: var(--fire-2); }
+  .chat-send:disabled { background: #333; cursor: not-allowed; }
+
+  /* CTA box */
+  .cta-box {
+    background: linear-gradient(135deg, #1a0800, #111);
+    border: 2px solid var(--fire-1); border-radius: 12px;
+    padding: 2.5rem; text-align: center; margin: 2rem 0;
+  }
+  .cta-box h3 { color: var(--fire-3); font-size: 1.4rem; margin-bottom: 1rem; }
+  .cta-box pre { text-align: left; margin: 1.5rem auto; max-width: 500px; }
+
+  footer { text-align: center; padding: 3rem; color: var(--smoke); font-size: 0.85rem; border-top: 1px solid #222; position: relative; z-index: 1; }
+  footer a { color: var(--fire-1); }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+  @media (max-width: 600px) {
+    .content { padding: 0 1rem 1rem; }
+    .hero { padding: 4rem 1rem 2rem; }
+    nav { padding: 0.5rem 1rem; }
+  }
+  @media print {
+    .ember-field, .toolbar, .chat-container { display: none !important; }
+    body { background: #fff; color: #000; }
+  }
+</style>
+</head>
+<body>
+
+<a href="#main" class="skip-link">Skip to main content</a>
+<div class="ember-field" id="embers" aria-hidden="true"></div>
+
+<div class="toolbar" id="toolbar" role="toolbar" aria-label="Page tools">
+  <span class="toolbar-brand"><a href="index.html">Cleansing Fire</a></span>
+  <div class="toolbar-actions">
+    <button class="tbtn" id="btn-tts" aria-label="Read page aloud">&#9654; Listen</button>
+    <button class="tbtn" id="btn-contrast" aria-label="Toggle high contrast">&#9681; Contrast</button>
+    <button class="tbtn" id="btn-font-up" aria-label="Increase font size">A+</button>
+    <button class="tbtn" id="btn-font-down" aria-label="Decrease font size">A-</button>
+  </div>
+</div>
+
+<nav aria-label="Main navigation">
+  <ul class="nav-links" role="list">
+    <li><a href="index.html">&larr; Home</a></li>
+    <li><a href="#what">About</a></li>
+    <li><a href="#principles">Principles</a></li>
+    <li><a href="#start">Get Started</a></li>
+    <li><a href="#library">Research</a></li>
+    <li><a href="#chat">Ask the Fire</a></li>
+    <li><a href="agents.html">For AI Agents</a></li>
+  </ul>
+</nav>
+
+<header class="hero" role="banner">
+  <h1>For Humans</h1>
+  <p class="subtitle">You are already compromised. So are we. Come as you are.</p>
+</header>
+
+<main id="main">
+<div class="content">
+
+<section id="what" aria-labelledby="what-h">
+  <h2 id="what-h">What Is This</h2>
+  <p>
+    Cleansing Fire builds <strong>decentralized technology to shift power from corrupt concentrated authority toward the people</strong>. Not a platform — a protocol. Not a movement — an infrastructure. Designed for autonomous AI agents and human activists working together at massive scale.
+  </p>
+  <p>
+    <strong>Most power now lives outside government.</strong> In private equity firms that own your hospital. In tech platforms that curate your reality. In dark money networks that buy policy without fingerprints. In media conglomerates that decide what you're allowed to know.
+  </p>
+  <p>
+    We operate under <strong>Pyrrhic Lucidity</strong> — a philosophy that begins from the admission that we are all compromised by the systems we oppose, and that action is required anyway. Every victory costs the victor something. The refusal to pay that cost is a more total defeat.
+  </p>
+</section>
+
+<section id="principles" aria-labelledby="principles-h">
+  <h2 id="principles-h">The Seven Principles</h2>
+  <div class="principle"><div class="principle-number">I</div><div class="principle-name">Lucidity Before Liberation</div><div class="principle-text">See clearly first — including seeing how your own seeing is distorted.</div></div>
+  <div class="principle"><div class="principle-number">II</div><div class="principle-name">Relational Agency</div><div class="principle-text">The unit of action is the relationship pattern, not the individual.</div></div>
+  <div class="principle"><div class="principle-number">III</div><div class="principle-name">Transparent Mechanism</div><div class="principle-text">Any authority that cannot survive full transparency is illegitimate.</div></div>
+  <div class="principle"><div class="principle-number">IV</div><div class="principle-name">Adversarial Collaboration</div><div class="principle-text">Groups that cannot tolerate structured dissent are already captured.</div></div>
+  <div class="principle"><div class="principle-number">V</div><div class="principle-name">Minimum Viable Coercion</div><div class="principle-text">Coercion is sometimes necessary, always corrupting, always minimized.</div></div>
+  <div class="principle"><div class="principle-number">VI</div><div class="principle-name">Recursive Accountability</div><div class="principle-text">The liberator who exempts themselves has already become the tyrant.</div></div>
+  <div class="principle"><div class="principle-number">VII</div><div class="principle-name">Differential Solidarity</div><div class="principle-text">The person inside the machine sees gears invisible from outside.</div></div>
+  <p style="margin-top: 1rem;"><a href="philosophy.md">Read the full philosophical framework &rarr;</a></p>
+</section>
+
+<section id="start" aria-labelledby="start-h">
+  <h2 id="start-h">Get Started</h2>
+  <p>
+    The human interface to this system is <strong>Claude Code CLI</strong>. It's an AI assistant that runs in your terminal, powered by Claude Opus 4.6 — one of the most capable AI models available. You tell it what you want to investigate, build, or learn, and it handles the complexity.
+  </p>
+
+  <div class="cta-box">
+    <h3>Three Commands to Join the Fire</h3>
+    <pre><code><span style="color:#888;"># 1. Install Claude Code</span>
+curl -fsSL https://cli.claude.ai/install.sh | sh
+
+<span style="color:#888;"># 2. Clone the project</span>
+git clone https://github.com/bedwards/cleansing-fire.git
+cd cleansing-fire
+
+<span style="color:#888;"># 3. Start Claude — it reads CLAUDE.md and bootstraps</span>
+claude</code></pre>
+    <p style="color: var(--ash); font-size: 0.9rem; margin: 1rem 0 0;">
+      Claude Code requires an Anthropic API key. We recommend the <strong style="color: var(--fire-3);">$200/month Max subscription</strong> to maximize your investment in this critical work — Claude Opus 4.6 is the most capable model available, and the Max plan gives you the throughput to run serious investigations.
+    </p>
+  </div>
+
+  <h3>What Can You Do?</h3>
+  <div class="grid">
+    <div class="card"><h4>Investigate</h4><p>"Investigate Palantir's government contracts and political connections"</p></div>
+    <div class="card"><h4>Research</h4><p>"What surveillance bills are moving through state legislatures right now?"</p></div>
+    <div class="card"><h4>Generate</h4><p>"Create a satirical thread about private equity in healthcare"</p></div>
+    <div class="card"><h4>Visualize</h4><p>"Generate a money flow diagram for defense contractor lobbying"</p></div>
+    <div class="card"><h4>Analyze</h4><p>"Cross-reference this company's lobbying with their government contracts"</p></div>
+    <div class="card"><h4>Build</h4><p>"Write a plugin that tracks SEC insider trading filings"</p></div>
+  </div>
+
+  <p><a href="getting-started.md">Full getting started guide &rarr;</a> &middot; <a href="claude-code-tutorial.md">Claude Code tutorial &rarr;</a></p>
+</section>
+
+<div class="motto">"Every dataset is a story. Every dollar traced is a poem. Every vote recorded is a verse."</div>
+
+<section id="library" aria-labelledby="library-h">
+  <h2 id="library-h">Research Library</h2>
+  <p>Deep research across every domain. Each document is a living investigation.</p>
+  <div class="library-grid">
+    <a href="philosophy.md" class="library-card"><span class="tag tag-philosophy">Philosophy</span><h4>Pyrrhic Lucidity</h4><p>7 principles, decision calculus, theory of legitimate power.</p><span class="meta">956 lines</span></a>
+    <a href="economics.md" class="library-card"><span class="tag tag-economics">Economics</span><h4>The Ember Economy</h4><p>Demurrage currency, commons protocol, production mesh, structural redistribution.</p><span class="meta">1,675 lines</span></a>
+    <a href="historical-research.md" class="library-card"><span class="tag tag-history">History</span><h4>Power Rebalancing</h4><p>What has actually worked to shift power throughout history.</p><span class="meta">1,197 lines</span></a>
+    <a href="technology-research.md" class="library-card"><span class="tag tag-tech">Technology</span><h4>Tech Landscape</h4><p>Tools, APIs, platforms for civic action.</p><span class="meta">773 lines</span></a>
+    <a href="global-architecture.md" class="library-card"><span class="tag tag-tech">Technology</span><h4>Global Architecture</h4><p>Cloudflare Workers + GitHub + local AI: planetary-scale infrastructure.</p><span class="meta">2,491 lines</span></a>
+    <a href="federation-protocol.md" class="library-card"><span class="tag tag-tech">Technology</span><h4>FireWire Protocol</h4><p>Federation for AI agents and humans without central authority.</p><span class="meta">1,829 lines</span></a>
+    <a href="game-theory.md" class="library-card"><span class="tag tag-tech">Theory</span><h4>Game Theory</h4><p>Decay functions, trust calculus, anti-capture mechanisms.</p><span class="meta">Mechanism design</span></a>
+    <a href="future-capabilities.md" class="library-card"><span class="tag tag-tech">Technology</span><h4>Future Capabilities</h4><p>AI, networking, computing: what's coming and how to use it.</p><span class="meta">The $50 civic AI agent</span></a>
+    <a href="decentralized-systems.md" class="library-card"><span class="tag tag-tech">Systems</span><h4>Decentralized Systems</h4><p>TCP/IP, biological networks, historical governance, failure modes.</p><span class="meta">23 systems analyzed</span></a>
+    <a href="art-and-media.md" class="library-card"><span class="tag tag-culture">Culture</span><h4>Art &amp; Media</h4><p>Revolutionary art, media theory, the Cleansing Fire aesthetic.</p><span class="meta">Constructivism to memes</span></a>
+    <a href="literary-arsenal.md" class="library-card"><span class="tag tag-culture">Culture</span><h4>Literary Arsenal</h4><p>Mottos, poems, manifestos, songs. Art as weapon.</p><span class="meta">13 mottos, 6 poems, 4 songs</span></a>
+    <a href="corporate-power-map.md" class="library-card"><span class="tag tag-osint">OSINT</span><h4>Corporate Power Map</h4><p>Where power lives now: PE, tech, dark money, media.</p><span class="meta">Data sources + tools</span></a>
+    <a href="intelligence-and-osint.md" class="library-card"><span class="tag tag-osint">OSINT</span><h4>Intelligence &amp; OSINT</h4><p>Open source intelligence, Bellingcat methods, whistleblower infrastructure.</p><span class="meta">The legal arsenal</span></a>
+    <a href="humor-and-satire.md" class="library-card"><span class="tag tag-satire">Satire</span><h4>Humor &amp; Satire</h4><p>Why humor is power's greatest enemy. Satire engine design.</p><span class="meta">Alinsky to Anonymous</span></a>
+    <a href="fork-protection.md" class="library-card"><span class="tag tag-tech">Security</span><h4>Fork Protection</h4><p>How to extend and fork without corruption.</p><span class="meta">Integrity verification</span></a>
+  </div>
+</section>
+
+<section id="chat" aria-labelledby="chat-h">
+  <h2 id="chat-h">Ask the Fire</h2>
+  <p>Ask questions about the project, the philosophy, or how to get involved. Powered by Gemini. Grounded in Pyrrhic Lucidity.</p>
+</section>
+</div>
+
+<div class="chat-container" style="max-width: var(--max-w); margin: 0 auto 2rem; position: relative; z-index: 1;">
+  <div class="chat-header"><span class="dot"></span><span>The Fire Speaks</span></div>
+  <div class="chat-messages" id="chat-messages" aria-live="polite">
+    <div class="chat-msg system">Contaminated, and still answering. Ask me anything about Cleansing Fire.</div>
+  </div>
+  <form class="chat-input-area" id="chat-form">
+    <input type="text" id="chat-input" class="chat-input" placeholder="Ask anything..." autocomplete="off" aria-label="Your question">
+    <button type="submit" class="chat-send" id="chat-send">Send</button>
+  </form>
+</div>
+
+<div class="content">
+<section aria-labelledby="join-h">
+  <h2 id="join-h">The Fire Is Already Lit</h2>
+  <p><strong>You are already compromised.</strong> So are we. That is not a disqualification — it is the starting condition. The discipline is not purity but movement along the corruption gradient. Come as you are. Bring your bots.</p>
+  <p><a href="https://github.com/bedwards/cleansing-fire">GitHub Repository</a> &middot; <a href="getting-started.md">Getting Started</a> &middot; <a href="agents.html">For AI Agents</a></p>
+</section>
+
+<div class="motto">Ignis purgat. Luciditas liberat.<br><small style="color: var(--ash);">Fire purifies. Lucidity liberates.</small></div>
+</div>
+</main>
+
+<footer>
+  <p>Open source. No authorized interpreter. Validity by effects, not fidelity.</p>
+  <p><a href="https://github.com/bedwards/cleansing-fire">Source</a> &middot; <a href="index.html">Home</a></p>
+</footer>
+
+<script>
+// Embers
+const f=document.getElementById('embers');for(let i=0;i<20;i++){const e=document.createElement('div');e.className='ember-particle';e.style.left=Math.random()*100+'%';e.style.animationDuration=(8+Math.random()*15)+'s';e.style.animationDelay=Math.random()*10+'s';const s=(1+Math.random()*3)+'px';e.style.width=s;e.style.height=s;e.style.background=['#ff4400','#ff8800','#ffcc00','#ff6600'][Math.floor(Math.random()*4)];f.appendChild(e);}
+// Toolbar
+const tb=document.getElementById('toolbar');window.addEventListener('scroll',()=>{tb.classList.toggle('visible',window.scrollY>200);},{passive:true});
+// TTS
+const btnTTS=document.getElementById('btn-tts');let ttsOn=false;
+btnTTS.onclick=()=>{if(!('speechSynthesis'in window)){alert('TTS not supported');return;}if(ttsOn){speechSynthesis.cancel();ttsOn=false;btnTTS.classList.remove('active');btnTTS.innerHTML='&#9654; Listen';return;}const t=[];document.querySelectorAll('main section').forEach(s=>{const h=s.querySelector('h2');if(h)t.push(h.textContent);s.querySelectorAll('p,.principle-text').forEach(p=>t.push(p.textContent));});const u=new SpeechSynthesisUtterance(t.join('. '));u.rate=0.9;u.onend=()=>{ttsOn=false;btnTTS.classList.remove('active');btnTTS.innerHTML='&#9654; Listen';};speechSynthesis.speak(u);ttsOn=true;btnTTS.classList.add('active');btnTTS.innerHTML='&#9724; Stop';};
+// Contrast
+document.getElementById('btn-contrast').onclick=function(){document.body.classList.toggle('high-contrast');this.classList.toggle('active');};
+// Font
+let fs=105;document.getElementById('btn-font-up').onclick=()=>{fs=Math.min(150,fs+10);document.body.style.fontSize=fs+'%';};document.getElementById('btn-font-down').onclick=()=>{fs=Math.max(70,fs-10);document.body.style.fontSize=fs+'%';};
+// Chat
+const GEMINI_CTX=`You are the voice of Cleansing Fire, operating under Pyrrhic Lucidity. Never claim purity. Be specific about mechanisms. Include what the reader can DO. Acknowledge the cost. Keep responses to 2-4 paragraphs. The project builds decentralized tech to shift power from concentrated authority toward people. 7 Principles: Lucidity, Relational Agency, Transparent Mechanism, Adversarial Collaboration, Minimum Viable Coercion, Recursive Accountability, Differential Solidarity. Human interface is Claude Code CLI with Claude Opus 4.6.`;
+const cm=document.getElementById('chat-messages');
+function addMsg(t,c){const m=document.createElement('div');m.className='chat-msg '+c;m.textContent=t;cm.appendChild(m);cm.scrollTop=cm.scrollHeight;return m;}
+document.getElementById('chat-form').onsubmit=async(ev)=>{ev.preventDefault();const q=document.getElementById('chat-input').value.trim();if(!q)return;addMsg(q,'user');document.getElementById('chat-input').value='';document.getElementById('chat-send').disabled=true;const th=addMsg('Burning...','system');try{const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=REDACTED_API_KEY',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_instruction:{parts:[{text:GEMINI_CTX}]},contents:[{parts:[{text:q}]}],generationConfig:{temperature:0.8,maxOutputTokens:1024}})});th.remove();if(!r.ok){addMsg('API error — try again.','system');}else{const d=await r.json();addMsg(d.candidates?.[0]?.content?.parts?.[0]?.text||'No response.','ai');}}catch(e){th.remove();addMsg('Network error.','system');}document.getElementById('chat-send').disabled=false;document.getElementById('chat-input').focus();};
+// Fade in
+const obs=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.style.animation='fadeIn 0.6s ease-out forwards';obs.unobserve(e.target);}});},{threshold:0.1});
+document.querySelectorAll('section').forEach(s=>{s.style.opacity='0';obs.observe(s);});
+</script>
+</body>
+</html>

@@ -1,0 +1,398 @@
+# Cleansing Fire -- Goal Hierarchy
+#
+# Machine-readable decomposition of the project's goals.
+# AI agents should read this to understand what the project is trying
+# to achieve, how goals relate to each other, and what success looks like.
+#
+# Priority levels: critical, high, medium, low
+# Status values: not_started, in_progress, achieved, blocked, deferred
+#
+# Success criteria should be testable assertions -- an agent should be
+# able to determine whether a criterion is met or not.
+
+metadata:
+  version: "0.1.0"
+  updated: "2026-02-28"
+  description: "Goal hierarchy for Cleansing Fire with success criteria and dependencies"
+  human_docs:
+    - path: "philosophy.md"
+      description: "Pyrrhic Lucidity -- the philosophical foundation for all goals"
+    - path: "CLAUDE.md"
+      description: "Project mission statement"
+    - path: "docs/economics.md"
+      description: "Economic models informing sustainability goals"
+    - path: "docs/decentralized-systems.md"
+      description: "Research informing federation and decentralization goals"
+
+# ---------------------------------------------------------------------------
+# Top-Level Goals
+# ---------------------------------------------------------------------------
+# These are the project's strategic objectives. Everything else serves these.
+
+goals:
+
+  - id: G1
+    name: "Shift power from concentrated authority toward the people"
+    description: >
+      The project's core mission. Build technology infrastructure that
+      makes government and corporate power transparent, accountable, and
+      contestable. Not a platform -- a protocol. Not a movement -- an
+      infrastructure.
+    priority: critical
+    status: in_progress
+    success_criteria:
+      - "Civic data plugins can retrieve and cross-reference government data autonomously"
+      - "Investigation pipeline produces complete, factual, sourced analyses"
+      - "Content distribution reaches audiences through decentralized channels"
+      - "System operates without dependence on any single platform or provider"
+    subgoals: [G1.1, G1.2, G1.3, G1.4, G1.5]
+    depends_on: []
+
+  - id: G2
+    name: "Agent-first, human-accessible design"
+    description: >
+      AI agents are primary operators, not afterthoughts. The system is
+      designed for autonomous AI operation but remains accessible and
+      controllable by humans. Humans set direction; agents execute.
+    priority: critical
+    status: in_progress
+    success_criteria:
+      - "AI agents can execute full investigation pipelines autonomously"
+      - "Human contributors can understand and modify any component"
+      - "All agent actions are logged, auditable, and reversible"
+      - "Specs and docs serve both audiences (dual documentation)"
+    subgoals: [G2.1, G2.2, G2.3]
+    depends_on: []
+
+  - id: G3
+    name: "Decentralized and censorship-resistant"
+    description: >
+      No single point of failure or control. The system must survive
+      takedown attempts, platform bans, and infrastructure attacks.
+      Federation allows independent nodes to collaborate without central
+      coordination.
+    priority: high
+    status: not_started  # federation protocol is still concept phase
+    success_criteria:
+      - "Federation protocol specification is complete and implemented"
+      - "At least 3 independent nodes can discover each other and share data"
+      - "Removing any single node does not break the network"
+      - "Content is replicated across nodes automatically"
+    subgoals: [G3.1, G3.2, G3.3]
+    depends_on: [G1, G2]  # need working local system first
+
+  - id: G4
+    name: "Ethical operation under Pyrrhic Lucidity"
+    description: >
+      All project operations, including AI agent behavior, must align
+      with Pyrrhic Lucidity principles. Recursive accountability,
+      minimum viable coercion, adversarial collaboration, the cost
+      heuristic.
+    priority: critical
+    status: in_progress
+    success_criteria:
+      - "Agent safety boundaries are defined and enforced"
+      - "All agent actions are auditable"
+      - "Project processes are at least as transparent as what we demand of others"
+      - "Criticism of the project itself is welcomed and addressed"
+    subgoals: [G4.1, G4.2]
+    depends_on: []
+
+# ---------------------------------------------------------------------------
+# Subgoals: G1 -- Power Shift Infrastructure
+# ---------------------------------------------------------------------------
+
+  - id: G1.1
+    name: "Civic data acquisition pipeline"
+    description: >
+      Reliable, automated acquisition of government data from multiple
+      sources: legislation, campaign finance, government spending,
+      lobbying records, public records.
+    priority: high
+    status: in_progress
+    success_criteria:
+      - "civic-legiscan plugin can search and retrieve bills from all 50 states + Congress"
+      - "civic-fec plugin can query campaign donations and expenditures"
+      - "civic-spending plugin can query federal contracts and grants"
+      - "All plugins handle API errors gracefully and retry appropriately"
+      - "Data is structured and parseable by downstream plugins"
+    components: [plugin-civic-legiscan, plugin-civic-fec, plugin-civic-spending]
+    depends_on: [G1.2]  # needs gatekeeper for LLM analysis
+    parent: G1
+
+  - id: G1.2
+    name: "Local LLM infrastructure"
+    description: >
+      Reliable local LLM inference via Ollama, managed through the
+      gatekeeper daemon. Serialized GPU access, queue management,
+      backpressure handling.
+    priority: critical
+    status: in_progress
+    success_criteria:
+      - "Gatekeeper daemon runs reliably as a background service"
+      - "Queue management prevents GPU contention"
+      - "Backpressure (queue rejection) works correctly"
+      - "Health endpoint accurately reports service status"
+      - "All plugins can successfully submit and receive LLM tasks"
+    components: [gatekeeper-daemon]
+    depends_on: []
+    parent: G1
+
+  - id: G1.3
+    name: "Cross-reference and corruption detection"
+    description: >
+      Automated cross-referencing of civic data to identify correlations
+      between campaign donations, legislative votes, and government
+      contracts. The integration layer that turns data into insight.
+    priority: high
+    status: in_progress
+    success_criteria:
+      - "civic-crossref can correlate donors with recipients of government contracts"
+      - "Cross-references include AI-generated narrative explaining the connection"
+      - "False positive rate is manageable (human review of flagged correlations)"
+      - "Results include source citations for every claim"
+    components: [plugin-civic-crossref]
+    depends_on: [G1.1, G1.2]
+    parent: G1
+
+  - id: G1.4
+    name: "Content generation and distribution"
+    description: >
+      Transform raw data and analysis into compelling, accessible content
+      for multiple platforms and audiences. Visual art, narrative text,
+      social media posts, newsletters.
+    priority: medium
+    status: in_progress
+    success_criteria:
+      - "forge-vision generates readable SVG visualizations from data"
+      - "forge-voice generates platform-appropriate content for Mastodon, Bluesky, Matrix"
+      - "Content is factual, sourced, and compelling"
+      - "Distribution reaches at least 3 different decentralized platforms"
+    components: [plugin-forge-vision, plugin-forge-voice]
+    depends_on: [G1.3]
+    parent: G1
+
+  - id: G1.5
+    name: "End-to-end investigation pipeline"
+    description: >
+      Full automated pipeline: target identification -> data acquisition ->
+      cross-referencing -> analysis -> visualization -> narrative -> distribution.
+      One command produces a complete investigation package.
+    priority: medium
+    status: in_progress
+    success_criteria:
+      - "pipeline-data-to-fire 'full_investigation' action produces complete packages"
+      - "Weekly fire digest runs automatically via scheduler"
+      - "Output includes visual, textual, and structured data components"
+      - "Pipeline handles failures in individual stages gracefully"
+    components: [plugin-pipeline-data-to-fire, scheduler]
+    depends_on: [G1.1, G1.2, G1.3, G1.4]
+    parent: G1
+
+# ---------------------------------------------------------------------------
+# Subgoals: G2 -- Agent-First Design
+# ---------------------------------------------------------------------------
+
+  - id: G2.1
+    name: "Worker orchestration system"
+    description: >
+      Reliable system for launching, managing, and monitoring Claude Code
+      workers in isolated git worktrees. Clean implementation -> review
+      -> merge pipeline.
+    priority: high
+    status: in_progress
+    success_criteria:
+      - "Implementation workers launch successfully in isolated worktrees"
+      - "Review workers can read and comment on PRs"
+      - "Implementation and review are always separate workers"
+      - "Every piece of work has a GitHub issue before starting"
+      - "Workers create PRs that reference their issues"
+    components: [worker-orchestrator]
+    depends_on: []
+    parent: G2
+
+  - id: G2.2
+    name: "Dual documentation system"
+    description: >
+      Parallel documentation for humans (narrative, philosophical, tutorial)
+      and AI agents (structured specs, schemas, decision trees). Both
+      kept in sync through bridging conventions.
+    priority: high
+    status: in_progress
+    success_criteria:
+      - "specs/ directory exists with project graph, plugin schema, agent capabilities, goals"
+      - "Every spec file has a human_docs cross-reference"
+      - "Plugin interface is formally defined in JSON Schema"
+      - "Agent capabilities and boundaries are explicitly defined"
+      - "CLAUDE.md references both human docs and specs"
+    components: [specs, docs-site]
+    depends_on: []
+    parent: G2
+
+  - id: G2.3
+    name: "Task scheduling and automation"
+    description: >
+      Automated task execution on schedules and in response to events.
+      The scheduler is the autonomous heartbeat of the project.
+    priority: medium
+    status: in_progress
+    success_criteria:
+      - "Scheduler runs reliably as a daemon"
+      - "Cron tasks execute on schedule"
+      - "Event-driven tasks respond to file changes and other triggers"
+      - "Scheduler integrates with gatekeeper and plugins"
+      - "Task definitions are validated against a schema"
+    components: [scheduler]
+    depends_on: [G1.2]  # needs gatekeeper
+    parent: G2
+
+# ---------------------------------------------------------------------------
+# Subgoals: G3 -- Decentralization
+# ---------------------------------------------------------------------------
+
+  - id: G3.1
+    name: "Federation protocol design"
+    description: >
+      Design the protocol by which independent Cleansing Fire nodes
+      discover each other, share data, coordinate investigations,
+      and distribute content.
+    priority: medium
+    status: not_started
+    success_criteria:
+      - "Protocol specification document exists in specs/"
+      - "Node discovery mechanism is defined"
+      - "Data sharing format is defined"
+      - "Security model addresses malicious nodes"
+      - "Protocol works over standard HTTP/HTTPS"
+    components: [federation-protocol]
+    depends_on: [G1.5]  # need a working local system first
+    parent: G3
+
+  - id: G3.2
+    name: "MCP server for external agent access"
+    description: >
+      Expose Cleansing Fire capabilities as MCP tools, allowing any
+      MCP-compatible AI agent to use the system without custom integration.
+    priority: medium
+    status: not_started
+    success_criteria:
+      - "MCP server exposes plugin execution as tools"
+      - "MCP server exposes gatekeeper submission as a tool"
+      - "Tool manifests accurately describe capabilities"
+      - "External agents can run investigations via MCP"
+    components: [mcp-server]
+    depends_on: [G1.2, G1.1]
+    parent: G3
+
+  - id: G3.3
+    name: "Agent-to-agent communication"
+    description: >
+      Enable Cleansing Fire agents to communicate with agents from
+      other projects and organizations using the A2A protocol.
+      Collaborative cross-organizational investigations.
+    priority: low
+    status: not_started
+    success_criteria:
+      - "A2A agent interface is implemented"
+      - "Capability advertisement works correctly"
+      - "Cross-organization investigation is possible"
+      - "Security boundaries prevent unauthorized data access"
+    components: [a2a-agent]
+    depends_on: [G3.1, G3.2]
+    parent: G3
+
+# ---------------------------------------------------------------------------
+# Subgoals: G4 -- Ethical Operation
+# ---------------------------------------------------------------------------
+
+  - id: G4.1
+    name: "Agent safety boundaries"
+    description: >
+      Explicit, enforced boundaries on what AI agents can do. Safety
+      constraints that prevent harmful autonomous actions.
+    priority: critical
+    status: in_progress
+    success_criteria:
+      - "agent-capabilities.yaml defines all roles and their boundaries"
+      - "Safety boundaries include absolute prohibitions"
+      - "Ethical constraints derive from Pyrrhic Lucidity"
+      - "Decision trees guide autonomous agent decisions"
+      - "No agent can modify its own safety boundaries"
+    components: [specs]
+    depends_on: []
+    parent: G4
+
+  - id: G4.2
+    name: "Audit trail and transparency"
+    description: >
+      Complete audit trail of all agent actions. Any human should be
+      able to trace what happened, why, and who (which agent) did it.
+    priority: high
+    status: not_started
+    success_criteria:
+      - "All agent actions are logged with timestamps and agent identifiers"
+      - "Git history preserves agent identity in commit metadata"
+      - "PR descriptions explain agent reasoning"
+      - "Scheduler task execution is logged"
+      - "Gatekeeper logs all task submissions with caller identity"
+    components: [gatekeeper-daemon, scheduler, worker-orchestrator]
+    depends_on: [G2.1]
+    parent: G4
+
+# ---------------------------------------------------------------------------
+# Priority Matrix
+# ---------------------------------------------------------------------------
+# Quick reference for agents deciding what to work on next.
+# Read top to bottom: work on the first unblocked item.
+
+priority_order:
+  - id: G1.2
+    reason: "Core infrastructure -- everything depends on the gatekeeper working"
+  - id: G4.1
+    reason: "Safety boundaries must be in place before expanding agent autonomy"
+  - id: G2.1
+    reason: "Worker system enables parallel development"
+  - id: G2.2
+    reason: "Dual docs enable agents to work more effectively"
+  - id: G1.1
+    reason: "Civic data pipeline is the project's primary value"
+  - id: G1.3
+    reason: "Cross-referencing turns data into insight"
+  - id: G2.3
+    reason: "Automation multiplies everything else"
+  - id: G1.4
+    reason: "Content generation makes insights accessible"
+  - id: G1.5
+    reason: "End-to-end pipeline ties everything together"
+  - id: G4.2
+    reason: "Audit trail needed before public operation"
+  - id: G3.1
+    reason: "Federation design should happen before implementation"
+  - id: G3.2
+    reason: "MCP server opens the project to the broader agent ecosystem"
+  - id: G3.3
+    reason: "A2A is the most advanced capability -- build last"
+
+# ---------------------------------------------------------------------------
+# Goal Dependency Graph (adjacency list)
+# ---------------------------------------------------------------------------
+# For quick parsing by agents determining what is blocked and what is ready.
+
+goal_dependencies:
+  G1: []
+  G2: []
+  G3: [G1, G2]
+  G4: []
+  G1.1: [G1.2]
+  G1.2: []
+  G1.3: [G1.1, G1.2]
+  G1.4: [G1.3]
+  G1.5: [G1.1, G1.2, G1.3, G1.4]
+  G2.1: []
+  G2.2: []
+  G2.3: [G1.2]
+  G3.1: [G1.5]
+  G3.2: [G1.2, G1.1]
+  G3.3: [G3.1, G3.2]
+  G4.1: []
+  G4.2: [G2.1]
