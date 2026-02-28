@@ -20,13 +20,16 @@
 
 const MODELS = {
   // Fast analysis -- low latency, good for classification and short tasks
-  fast: "@cf/mistral/mistral-7b-instruct-v0.2",
+  fast: "@hf/mistral/mistral-7b-instruct-v0.2",
 
   // Standard analysis -- balanced quality and speed
   standard: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
 
+  // Deep analysis -- reasoning-focused
+  deep: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+
   // Multilingual -- for non-English content
-  multilingual: "@cf/glm/glm-4.7-flash",
+  multilingual: "@cf/meta/llama-3.2-3b-instruct",
 
   // Code analysis -- for analyzing legislative markup, data formats
   code: "@cf/qwen/qwen2.5-coder-32b-instruct",
@@ -114,7 +117,7 @@ async function handleAnalyze(request, env) {
       model = MODELS.fast;
       break;
     case "deep":
-      model = MODELS.standard;
+      model = MODELS.deep;
       break;
     case "standard":
     default:
