@@ -799,57 +799,18 @@ def generate_public_comment(docket, agency, position, facts=None):
 
     prompt = f"""Draft a formal public comment for a regulatory proceeding.
 
-AGENCY: {agency}
-DOCKET NUMBER: {docket}
-POSITION: {position}
+Agency: {agency}. Docket: {docket}. Position: {position}
+Facts:\n{facts_str}
 
-SUPPORTING FACTS:
-{facts_str}
-
-STRUCTURE THE PUBLIC COMMENT AS FOLLOWS:
-
-1. HEADER -- Standard regulatory comment format:
-   "[COMMENTER NAME]
-    Comments on [DOCKET NUMBER]
-    [AGENCY NAME]
-    [DATE]"
-
-2. INTRODUCTION -- Identify the commenter (placeholder), state which
-   rulemaking or proceeding the comment addresses (by docket number),
-   and summarize the position in 1-2 sentences.
-
-3. BACKGROUND AND INTEREST -- Explain why the commenter has standing
-   or interest in this proceeding. Regulatory agencies give more weight
-   to comments that demonstrate relevant expertise or direct impact.
-
-4. SUBSTANTIVE COMMENTS -- Organized by specific provisions of the
-   proposed rule or action. For each point:
-   a. Identify the specific provision being addressed
-   b. State the position (support, oppose, or request modification)
-   c. Provide factual and legal basis for the position
-   d. Cite relevant statutes, regulations, or precedents
-   e. Propose specific alternative language where appropriate
-
-5. LEGAL AND POLICY ARGUMENTS -- Broader arguments about the proceeding:
-   - Administrative Procedure Act requirements (5 U.S.C. Section 553)
-   - Arbitrary and capricious standard (5 U.S.C. Section 706(2)(A))
-   - Cost-benefit analysis concerns
-   - Statutory authority questions
-
-6. CONCLUSION -- Restate position, request specific action, offer to
-   provide additional information.
-
-7. SIGNATURE -- Commenter identification placeholder
-
-The comment must:
-- Follow the formal structure expected by regulatory agencies
-- Be substantive (agencies are required to consider and respond to substantive comments)
-- Cite specific provisions of the proposed rule by section number where possible
-- Present factual evidence and legal argument, not just opinion
-- Be suitable for submission through regulations.gov or agency-specific portals
-- Reference the Administrative Procedure Act's notice-and-comment requirements
-
-Generate ONLY the public comment text."""
+Structure: 1) Header (commenter name placeholder, docket, agency, date),
+2) Introduction identifying the proceeding and summarizing position,
+3) Background and interest (expertise/standing), 4) Substantive comments
+organized by rule provisions (identify provision, state position, factual and
+legal basis, cite statutes, propose alternatives), 5) Legal/policy arguments
+citing APA (5 U.S.C. Section 553), arbitrary/capricious standard (Section 706(2)(A)),
+6) Conclusion restating position, 7) Signature placeholder.
+Substantive, cite rule sections, factual evidence not just opinion, suitable for
+regulations.gov. Generate ONLY the comment text."""
 
     content = ask_gatekeeper(prompt, temperature=0.2, max_tokens=4096)
     if not content:
