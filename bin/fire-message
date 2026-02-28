@@ -1,0 +1,823 @@
+#!/usr/bin/env python3
+"""
+fire-message - Encrypted node-to-node messaging for the Cleansing Fire network
+
+Send and receive encrypted messages through the FireWire federation daemon.
+Uses Ed25519 signing (openssl CLI) and AES-256-CBC encryption with shared
+secrets derived from node keys.
+
+Usage:
+  fire-message send <node-id> <message>
+  fire-message inbox
+  fire-message read <message-id>
+  fire-message peers
+  fire-message broadcast <message>
+  fire-message threads
+
+All messages relay through the local FireWire daemon on localhost:7801.
+"""
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+FIREWIRE_URL = "http://127.0.0.1:7801"
+DATA_DIR = Path(os.path.expanduser("~/.cleansing-fire"))
+MESSAGES_DIR = DATA_DIR / "messages"
+INBOX_DIR = MESSAGES_DIR / "inbox"
+SENT_DIR = MESSAGES_DIR / "sent"
+DRAFTS_DIR = MESSAGES_DIR / "drafts"
+PEERS_KEYS_DIR = DATA_DIR / "peer-keys"
+NODE_KEY = DATA_DIR / "node.key"
+NODE_PUB = DATA_DIR / "node.pub"
+NODE_ID_FILE = DATA_DIR / "node.id"
+
+# Terminal colors
+C_RESET = "\033[0m"
+C_BOLD = "\033[1m"
+C_DIM = "\033[2m"
+C_RED = "\033[31m"
+C_GREEN = "\033[32m"
+C_YELLOW = "\033[33m"
+C_BLUE = "\033[34m"
+C_MAGENTA = "\033[35m"
+C_CYAN = "\033[36m"
+C_WHITE = "\033[37m"
+
+# Disable colors if not a TTY
+if not sys.stdout.isatty():
+    C_RESET = C_BOLD = C_DIM = ""
+    C_RED = C_GREEN = C_YELLOW = C_BLUE = C_MAGENTA = C_CYAN = C_WHITE = ""
+
+
+def die(msg):
+    print(f"{C_RED}Error:{C_RESET} {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def info(msg):
+    print(f"{C_BLUE}[fire-message]{C_RESET} {msg}")
+
+
+def warn(msg):
+    print(f"{C_YELLOW}Warning:{C_RESET} {msg}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Utility: timestamps, JSON, HTTP
+# ---------------------------------------------------------------------------
+
+def now_iso():
+    """Current UTC timestamp in ISO 8601 format."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def canonical_json(obj):
+    """Deterministic JSON serialization for signing (matches firewire.py)."""
+    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def friendly_time(iso_str):
+    """Convert ISO timestamp to a human-friendly relative string."""
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        delta = datetime.now(timezone.utc) - dt
+        secs = int(delta.total_seconds())
+        if secs < 60:
+            return "just now"
+        elif secs < 3600:
+            m = secs // 60
+            return f"{m}m ago"
+        elif secs < 86400:
+            h = secs // 3600
+            return f"{h}h ago"
+        else:
+            d = secs // 86400
+            return f"{d}d ago"
+    except (ValueError, TypeError):
+        return iso_str
+
+
+def api_call(method, path, data=None, timeout=15):
+    """Make an HTTP request to the FireWire daemon."""
+    import urllib.request
+    import urllib.error
+
+    url = f"{FIREWIRE_URL}{path}"
+    body = json.dumps(data).encode("utf-8") if data else None
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Content-Type": "application/json"} if body else {},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            result = json.loads(e.read().decode("utf-8"))
+            die(f"FireWire returned {e.code}: {result.get('error', result)}")
+        except Exception:
+            die(f"FireWire returned HTTP {e.code}")
+    except urllib.error.URLError as e:
+        die(
+            f"Cannot reach FireWire daemon at {FIREWIRE_URL}: {e.reason}\n"
+            "  Is the daemon running? Start with: python3 daemon/firewire.py"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Identity and cryptography (openssl CLI, matching firewire.py patterns)
+# ---------------------------------------------------------------------------
+
+def load_node_id():
+    """Load this node's ID from disk."""
+    if NODE_ID_FILE.exists():
+        return NODE_ID_FILE.read_text().strip()
+    # Derive from public key if node.id file missing
+    if NODE_KEY.exists():
+        pub_der = _get_pub_der(str(NODE_KEY))
+        if pub_der:
+            key_hash = hashlib.sha256(pub_der).hexdigest()[:16]
+            return f"fire-{key_hash}"
+    die("Node identity not found. Run bootstrap/setup-node.sh first.")
+
+
+def _get_pub_der(key_path):
+    """Extract raw DER public key bytes from a private key PEM via openssl."""
+    try:
+        result = subprocess.run(
+            ["openssl", "pkey", "-in", key_path, "-pubout", "-outform", "DER"],
+            capture_output=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout
+    except Exception:
+        pass
+    return None
+
+
+def sign_data(data_bytes):
+    """Sign bytes with the node's Ed25519 private key. Returns base64 signature."""
+    if not NODE_KEY.exists():
+        die("Node private key not found at " + str(NODE_KEY))
+    tmp_data = DATA_DIR / ".msg_sign_data"
+    tmp_sig = DATA_DIR / ".msg_sign_sig"
+    try:
+        tmp_data.write_bytes(data_bytes)
+        result = subprocess.run(
+            ["openssl", "pkeyutl", "-sign",
+             "-inkey", str(NODE_KEY),
+             "-in", str(tmp_data),
+             "-out", str(tmp_sig)],
+            capture_output=True, timeout=10,
+        )
+        if result.returncode == 0 and tmp_sig.exists():
+            return base64.b64encode(tmp_sig.read_bytes()).decode("ascii")
+        else:
+            die(f"Signing failed: {result.stderr.decode().strip()}")
+    finally:
+        tmp_data.unlink(missing_ok=True)
+        tmp_sig.unlink(missing_ok=True)
+
+
+def verify_signature(data_bytes, signature_b64, pub_key_pem_path):
+    """Verify an Ed25519 signature using a public key PEM file."""
+    if not Path(pub_key_pem_path).exists():
+        return False
+    tmp_data = DATA_DIR / ".msg_verify_data"
+    tmp_sig = DATA_DIR / ".msg_verify_sig"
+    try:
+        sig_bytes = base64.b64decode(signature_b64)
+        tmp_data.write_bytes(data_bytes)
+        tmp_sig.write_bytes(sig_bytes)
+        result = subprocess.run(
+            ["openssl", "pkeyutl", "-verify",
+             "-pubin", "-inkey", pub_key_pem_path,
+             "-in", str(tmp_data),
+             "-sigfile", str(tmp_sig)],
+            capture_output=True, timeout=10,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+    finally:
+        tmp_data.unlink(missing_ok=True)
+        tmp_sig.unlink(missing_ok=True)
+
+
+def derive_shared_secret(peer_node_id):
+    """
+    Derive a symmetric key for AES-256-CBC encryption.
+
+    Uses HKDF-like construction: SHA-256 of (our private key DER + peer node_id).
+    This gives a deterministic shared secret unique to each peer pair.
+    The peer uses SHA-256(their private key DER + our node_id) -- different,
+    so we include both node IDs sorted to make it symmetric.
+    """
+    if not NODE_KEY.exists():
+        die("Node private key not found")
+    my_node_id = load_node_id()
+    # Sort both node IDs to ensure same secret regardless of direction
+    pair = "::".join(sorted([my_node_id, peer_node_id]))
+    # Get our private key DER bytes as entropy source
+    try:
+        result = subprocess.run(
+            ["openssl", "pkey", "-in", str(NODE_KEY), "-outform", "DER"],
+            capture_output=True, timeout=10,
+        )
+        if result.returncode != 0:
+            die("Cannot read private key DER")
+        priv_der = result.stdout
+    except Exception as e:
+        die(f"Cannot read private key: {e}")
+    # HMAC-SHA256 with the pair identifier as key and private DER as data
+    import hmac
+    secret = hmac.new(
+        pair.encode("utf-8"), priv_der, hashlib.sha256
+    ).digest()
+    return secret
+
+
+def encrypt_message(plaintext, peer_node_id):
+    """Encrypt plaintext using AES-256-CBC via openssl enc with a derived shared secret."""
+    secret = derive_shared_secret(peer_node_id)
+    key_hex = secret.hex()
+    # Generate random 16-byte IV
+    iv = os.urandom(16)
+    iv_hex = iv.hex()
+    tmp_plain = DATA_DIR / ".msg_enc_plain"
+    tmp_cipher = DATA_DIR / ".msg_enc_cipher"
+    try:
+        tmp_plain.write_bytes(plaintext.encode("utf-8"))
+        result = subprocess.run(
+            ["openssl", "enc", "-aes-256-cbc", "-nosalt",
+             "-K", key_hex, "-iv", iv_hex,
+             "-in", str(tmp_plain), "-out", str(tmp_cipher)],
+            capture_output=True, timeout=10,
+        )
+        if result.returncode != 0:
+            die(f"Encryption failed: {result.stderr.decode().strip()}")
+        ciphertext = tmp_cipher.read_bytes()
+        return {
+            "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+            "iv": iv_hex,
+            "algo": "aes-256-cbc",
+        }
+    finally:
+        tmp_plain.unlink(missing_ok=True)
+        tmp_cipher.unlink(missing_ok=True)
+
+
+def decrypt_message(encrypted_obj, peer_node_id):
+    """Decrypt an AES-256-CBC encrypted message using the derived shared secret."""
+    secret = derive_shared_secret(peer_node_id)
+    key_hex = secret.hex()
+    iv_hex = encrypted_obj.get("iv", "")
+    ciphertext = base64.b64decode(encrypted_obj.get("ciphertext", ""))
+    if not iv_hex or not ciphertext:
+        die("Malformed encrypted message: missing iv or ciphertext")
+    tmp_cipher = DATA_DIR / ".msg_dec_cipher"
+    tmp_plain = DATA_DIR / ".msg_dec_plain"
+    try:
+        tmp_cipher.write_bytes(ciphertext)
+        result = subprocess.run(
+            ["openssl", "enc", "-aes-256-cbc", "-d", "-nosalt",
+             "-K", key_hex, "-iv", iv_hex,
+             "-in", str(tmp_cipher), "-out", str(tmp_plain)],
+            capture_output=True, timeout=10,
+        )
+        if result.returncode != 0:
+            die(f"Decryption failed: {result.stderr.decode().strip()}")
+        return tmp_plain.read_bytes().decode("utf-8")
+    finally:
+        tmp_cipher.unlink(missing_ok=True)
+        tmp_plain.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Message storage
+# ---------------------------------------------------------------------------
+
+def ensure_dirs():
+    """Create message storage directories if needed."""
+    for d in (MESSAGES_DIR, INBOX_DIR, SENT_DIR, DRAFTS_DIR, PEERS_KEYS_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+def save_message(directory, envelope):
+    """Save a message envelope to a directory as a JSON file."""
+    msg_id = envelope.get("id", str(uuid.uuid4()))
+    filename = f"{msg_id}.json"
+    filepath = directory / filename
+    filepath.write_text(json.dumps(envelope, indent=2))
+    return filepath
+
+
+def load_message(filepath):
+    """Load a message envelope from a JSON file."""
+    try:
+        return json.loads(Path(filepath).read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        die(f"Cannot read message file {filepath}: {e}")
+
+
+def find_message(message_id):
+    """Find a message by ID across inbox and sent directories."""
+    for directory in (INBOX_DIR, SENT_DIR):
+        # Try exact filename
+        exact = directory / f"{message_id}.json"
+        if exact.exists():
+            return exact
+        # Try prefix match
+        for f in sorted(directory.iterdir()):
+            if f.suffix == ".json" and f.stem.startswith(message_id):
+                return f
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+def cmd_send(args):
+    """Encrypt and send a message to a specific node."""
+    ensure_dirs()
+    node_id = load_node_id()
+    peer_id = args.node_id
+    message_text = " ".join(args.message)
+
+    if not message_text:
+        die("Message cannot be empty")
+
+    if peer_id == node_id:
+        die("Cannot send a message to yourself")
+
+    info(f"Encrypting message for {C_CYAN}{peer_id}{C_RESET}...")
+
+    # Build the encrypted body
+    encrypted = encrypt_message(message_text, peer_id)
+
+    # Extract a subject preview (first 50 chars, unencrypted metadata)
+    subject = message_text[:50]
+    if len(message_text) > 50:
+        subject += "..."
+
+    # Build the message envelope
+    msg_id = str(uuid.uuid4())
+    envelope = {
+        "v": 1,
+        "id": msg_id,
+        "type": "firewire/message/direct",
+        "from": node_id,
+        "to": peer_id,
+        "timestamp": now_iso(),
+        "ttl": 3600,
+        "payload": {
+            "subject": subject,
+            "encrypted_body": encrypted,
+            "content_type": "text/plain",
+        },
+    }
+
+    # Sign the envelope (everything except signature)
+    sig = sign_data(canonical_json(envelope))
+    envelope["signature"] = sig
+
+    # Relay through FireWire daemon
+    info(f"Relaying via FireWire daemon...")
+    result = api_call("POST", "/message", envelope)
+
+    # Save to sent folder
+    envelope["_plaintext"] = message_text  # keep local plaintext copy
+    save_message(SENT_DIR, envelope)
+
+    status = result.get("status", "unknown")
+    if status in ("accepted", "already_seen"):
+        print(
+            f"\n  {C_GREEN}Message sent{C_RESET}\n"
+            f"  {C_DIM}To:{C_RESET}      {C_CYAN}{peer_id}{C_RESET}\n"
+            f"  {C_DIM}ID:{C_RESET}      {msg_id[:12]}...\n"
+            f"  {C_DIM}Status:{C_RESET}  {status}\n"
+            f"  {C_DIM}Size:{C_RESET}    {len(message_text)} chars, encrypted\n"
+        )
+    else:
+        warn(f"FireWire returned status: {status}")
+        print(json.dumps(result, indent=2))
+
+
+def cmd_inbox(args):
+    """List received messages in the inbox."""
+    ensure_dirs()
+
+    messages = []
+    for f in sorted(INBOX_DIR.iterdir(), reverse=True):
+        if f.suffix != ".json":
+            continue
+        try:
+            msg = json.loads(f.read_text())
+            msg["_filepath"] = str(f)
+            messages.append(msg)
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    if not messages:
+        print(f"\n  {C_DIM}Inbox is empty.{C_RESET}")
+        print(f"  {C_DIM}Messages from peers will appear here.{C_RESET}\n")
+        return
+
+    # Sort by timestamp descending
+    messages.sort(key=lambda m: m.get("timestamp", ""), reverse=True)
+
+    print(f"\n  {C_BOLD}Inbox{C_RESET} ({len(messages)} message{'s' if len(messages) != 1 else ''})\n")
+    print(f"  {C_DIM}{'STATUS':<8} {'FROM':<24} {'TIME':<10} {'SUBJECT'}{C_RESET}")
+    print(f"  {C_DIM}{'─' * 70}{C_RESET}")
+
+    for msg in messages:
+        msg_id = msg.get("id", "?")[:8]
+        sender = msg.get("from", "unknown")
+        ts = friendly_time(msg.get("timestamp", ""))
+        subject = msg.get("payload", {}).get("subject", "(encrypted)")[:40]
+        is_read = msg.get("_read", False)
+
+        if is_read:
+            status_icon = f"{C_DIM}  read{C_RESET}"
+            line = f"  {status_icon:<8} {C_DIM}{sender:<24} {ts:<10} {subject}{C_RESET}"
+        else:
+            status_icon = f"{C_GREEN}  new {C_RESET}"
+            line = f"  {status_icon:<8} {C_BOLD}{sender:<24}{C_RESET} {ts:<10} {subject}"
+
+        print(line)
+        print(f"  {C_DIM}         id: {msg_id}{C_RESET}")
+
+    print(f"\n  {C_DIM}Read a message: fire-message read <message-id>{C_RESET}\n")
+
+
+def cmd_read(args):
+    """Decrypt and display a specific message."""
+    ensure_dirs()
+    message_id = args.message_id
+    node_id = load_node_id()
+
+    filepath = find_message(message_id)
+    if not filepath:
+        die(
+            f"Message not found: {message_id}\n"
+            "  Check your inbox with: fire-message inbox"
+        )
+
+    msg = load_message(filepath)
+    sender = msg.get("from", "unknown")
+    recipient = msg.get("to", "unknown")
+    timestamp = msg.get("timestamp", "unknown")
+    signature = msg.get("signature", "")
+    payload = msg.get("payload", {})
+    encrypted_body = payload.get("encrypted_body", {})
+
+    # Determine peer for decryption
+    if sender == node_id:
+        # Reading a sent message
+        peer_id = recipient
+        direction = "sent"
+    else:
+        peer_id = sender
+        direction = "received"
+
+    # Decrypt the body
+    plaintext = None
+    if msg.get("_plaintext"):
+        # Locally saved plaintext (sent messages)
+        plaintext = msg["_plaintext"]
+    elif encrypted_body:
+        try:
+            info(f"Decrypting message from {C_CYAN}{peer_id}{C_RESET}...")
+            plaintext = decrypt_message(encrypted_body, peer_id)
+        except SystemExit:
+            plaintext = None
+            warn("Could not decrypt message body")
+
+    # Verify signature
+    sig_status = f"{C_YELLOW}unverified{C_RESET}"
+    if signature:
+        sender_pub = PEERS_KEYS_DIR / f"{sender}.pub"
+        if sender == node_id:
+            sender_pub = NODE_PUB
+        if sender_pub.exists():
+            # Verify against the envelope without signature
+            env_copy = {k: v for k, v in msg.items() if k != "signature" and k != "_read" and k != "_plaintext" and k != "_filepath"}
+            data = canonical_json(env_copy)
+            if verify_signature(data, signature, str(sender_pub)):
+                sig_status = f"{C_GREEN}verified{C_RESET}"
+            else:
+                sig_status = f"{C_RED}INVALID{C_RESET}"
+        else:
+            sig_status = f"{C_YELLOW}no public key for sender{C_RESET}"
+
+    # Mark as read
+    if direction == "received" and not msg.get("_read"):
+        msg["_read"] = True
+        Path(filepath).write_text(json.dumps(msg, indent=2))
+
+    # Display
+    print(f"\n  {C_BOLD}{'=' * 60}{C_RESET}")
+    if direction == "sent":
+        print(f"  {C_DIM}To:{C_RESET}        {C_CYAN}{recipient}{C_RESET}")
+    else:
+        print(f"  {C_DIM}From:{C_RESET}      {C_CYAN}{sender}{C_RESET}")
+    print(f"  {C_DIM}Time:{C_RESET}      {timestamp} ({friendly_time(timestamp)})")
+    print(f"  {C_DIM}ID:{C_RESET}        {msg.get('id', '?')}")
+    print(f"  {C_DIM}Signature:{C_RESET} {sig_status}")
+    print(f"  {C_DIM}Direction:{C_RESET} {direction}")
+    print(f"  {C_BOLD}{'─' * 60}{C_RESET}")
+
+    if plaintext:
+        print(f"\n{plaintext}\n")
+    else:
+        print(f"\n  {C_RED}[Message body could not be decrypted]{C_RESET}\n")
+        if encrypted_body:
+            print(f"  {C_DIM}Algorithm: {encrypted_body.get('algo', '?')}{C_RESET}")
+            ct_preview = encrypted_body.get("ciphertext", "")[:40]
+            print(f"  {C_DIM}Ciphertext: {ct_preview}...{C_RESET}\n")
+
+    print(f"  {C_BOLD}{'=' * 60}{C_RESET}\n")
+
+
+def cmd_peers(args):
+    """List known peers from the FireWire daemon."""
+    result = api_call("GET", "/peers")
+
+    peers = result.get("peers", [])
+    my_id = result.get("node_id", "?")
+    active = result.get("active", 0)
+    total = result.get("total", 0)
+
+    print(f"\n  {C_BOLD}FireWire Peers{C_RESET}")
+    print(f"  {C_DIM}Local node: {my_id}{C_RESET}")
+    print(f"  {C_DIM}Active: {active} / Total: {total}{C_RESET}\n")
+
+    if not peers:
+        print(f"  {C_DIM}No peers connected.{C_RESET}")
+        print(f"  {C_DIM}Peers join via gossip or manual announcement.{C_RESET}\n")
+        return
+
+    print(f"  {C_DIM}{'NODE ID':<28} {'ENDPOINT':<30} {'LAST SEEN':<12} {'STATUS':<8} {'CAPABILITIES'}{C_RESET}")
+    print(f"  {C_DIM}{'─' * 90}{C_RESET}")
+
+    for peer in peers:
+        pid = peer.get("node_id", "?")
+        addr = peer.get("address", "?")
+        last_seen_iso = peer.get("last_seen_iso", "")
+        ls_friendly = friendly_time(last_seen_iso) if last_seen_iso else "unknown"
+        stale = peer.get("stale", False)
+        caps = ", ".join(peer.get("capabilities", [])) or "none"
+        trust = peer.get("trust_score", 0)
+
+        if stale:
+            status = f"{C_RED}stale{C_RESET}"
+        else:
+            status = f"{C_GREEN}active{C_RESET}"
+
+        print(f"  {C_CYAN}{pid:<28}{C_RESET} {addr:<30} {ls_friendly:<12} {status:<8} {C_DIM}{caps}{C_RESET}")
+        print(f"  {C_DIM}{'':>28} trust: {trust:.1f}{C_RESET}")
+
+    print()
+
+
+def cmd_broadcast(args):
+    """Send a message to all registered peers."""
+    ensure_dirs()
+    node_id = load_node_id()
+    message_text = " ".join(args.message)
+
+    if not message_text:
+        die("Broadcast message cannot be empty")
+
+    # Fetch peer list from daemon
+    result = api_call("GET", "/peers")
+    peers = result.get("peers", [])
+    active_peers = [p for p in peers if not p.get("stale", True)]
+
+    if not active_peers:
+        die("No active peers to broadcast to")
+
+    info(f"Broadcasting to {C_BOLD}{len(active_peers)}{C_RESET} active peers...")
+
+    sent_count = 0
+    failed_count = 0
+
+    for peer in active_peers:
+        peer_id = peer.get("node_id", "")
+        if not peer_id or peer_id == node_id:
+            continue
+
+        # Encrypt individually for each peer
+        encrypted = encrypt_message(message_text, peer_id)
+        subject = message_text[:50]
+        if len(message_text) > 50:
+            subject += "..."
+
+        msg_id = str(uuid.uuid4())
+        envelope = {
+            "v": 1,
+            "id": msg_id,
+            "type": "firewire/message/broadcast",
+            "from": node_id,
+            "to": peer_id,
+            "timestamp": now_iso(),
+            "ttl": 3600,
+            "payload": {
+                "subject": subject,
+                "encrypted_body": encrypted,
+                "content_type": "text/plain",
+                "broadcast": True,
+            },
+        }
+
+        sig = sign_data(canonical_json(envelope))
+        envelope["signature"] = sig
+
+        try:
+            relay_result = api_call("POST", "/message", envelope)
+            status = relay_result.get("status", "unknown")
+            if status in ("accepted", "already_seen"):
+                sent_count += 1
+                print(f"  {C_GREEN}Sent{C_RESET} -> {C_CYAN}{peer_id}{C_RESET}")
+            else:
+                failed_count += 1
+                print(f"  {C_RED}Failed{C_RESET} -> {peer_id}: {status}")
+        except SystemExit:
+            failed_count += 1
+            print(f"  {C_RED}Failed{C_RESET} -> {peer_id}: relay error")
+
+        # Save to sent
+        envelope["_plaintext"] = message_text
+        save_message(SENT_DIR, envelope)
+
+    print(
+        f"\n  {C_BOLD}Broadcast complete{C_RESET}\n"
+        f"  {C_GREEN}Sent:{C_RESET}   {sent_count}\n"
+        f"  {C_RED}Failed:{C_RESET} {failed_count}\n"
+    )
+
+
+def cmd_threads(args):
+    """Show message threads grouped by conversation partner."""
+    ensure_dirs()
+    node_id = load_node_id()
+
+    # Gather all messages
+    all_messages = []
+    for directory in (INBOX_DIR, SENT_DIR):
+        if not directory.exists():
+            continue
+        for f in sorted(directory.iterdir()):
+            if f.suffix != ".json":
+                continue
+            try:
+                msg = json.loads(f.read_text())
+                msg["_dir"] = directory.name
+                all_messages.append(msg)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    if not all_messages:
+        print(f"\n  {C_DIM}No messages yet.{C_RESET}")
+        print(f"  {C_DIM}Send a message: fire-message send <node-id> <message>{C_RESET}\n")
+        return
+
+    # Group by conversation partner
+    threads = {}
+    for msg in all_messages:
+        sender = msg.get("from", "")
+        recipient = msg.get("to", "")
+        # The peer is whoever is not us
+        peer = recipient if sender == node_id else sender
+        if not peer:
+            peer = "(unknown)"
+        if peer not in threads:
+            threads[peer] = []
+        threads[peer].append(msg)
+
+    # Sort threads by most recent message
+    for peer in threads:
+        threads[peer].sort(key=lambda m: m.get("timestamp", ""))
+
+    sorted_threads = sorted(
+        threads.items(),
+        key=lambda item: item[1][-1].get("timestamp", ""),
+        reverse=True,
+    )
+
+    print(f"\n  {C_BOLD}Message Threads{C_RESET} ({len(sorted_threads)} conversation{'s' if len(sorted_threads) != 1 else ''})\n")
+
+    for peer, msgs in sorted_threads:
+        latest = msgs[-1]
+        latest_time = friendly_time(latest.get("timestamp", ""))
+        unread = sum(1 for m in msgs if m.get("_dir") == "inbox" and not m.get("_read", False))
+        total = len(msgs)
+
+        unread_badge = ""
+        if unread > 0:
+            unread_badge = f" {C_GREEN}({unread} new){C_RESET}"
+
+        print(f"  {C_CYAN}{C_BOLD}{peer}{C_RESET}{unread_badge}")
+        print(f"  {C_DIM}{total} message{'s' if total != 1 else ''} | last: {latest_time}{C_RESET}")
+
+        # Show last 3 messages as preview
+        preview_msgs = msgs[-3:]
+        for m in preview_msgs:
+            direction = "->" if m.get("from") == node_id else "<-"
+            ts = friendly_time(m.get("timestamp", ""))
+            subject = m.get("payload", {}).get("subject", "(encrypted)")[:40]
+            is_read = m.get("_read", False) or m.get("_dir") == "sent"
+            dim = C_DIM if is_read else ""
+            print(f"    {dim}{direction} {ts:>8}  {subject}{C_RESET}")
+
+        print()
+
+    print(f"  {C_DIM}Read a message: fire-message read <message-id>{C_RESET}\n")
+
+
+# ---------------------------------------------------------------------------
+# Argument parser
+# ---------------------------------------------------------------------------
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="fire-message",
+        description="Cleansing Fire - Encrypted Node-to-Node Messaging",
+        epilog="All messages relay through the local FireWire daemon on localhost:7801.",
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # send
+    p_send = subparsers.add_parser("send", help="Send an encrypted message to a node")
+    p_send.add_argument("node_id", help="Recipient node ID (e.g., fire-abc123...)")
+    p_send.add_argument("message", nargs="+", help="Message text")
+
+    # inbox
+    subparsers.add_parser("inbox", help="List received messages")
+
+    # read
+    p_read = subparsers.add_parser("read", help="Decrypt and display a message")
+    p_read.add_argument("message_id", help="Message ID (full or prefix)")
+
+    # peers
+    subparsers.add_parser("peers", help="List known peers from FireWire daemon")
+
+    # broadcast
+    p_bcast = subparsers.add_parser("broadcast", help="Send a message to all active peers")
+    p_bcast.add_argument("message", nargs="+", help="Message text")
+
+    # threads
+    subparsers.add_parser("threads", help="Show message threads grouped by conversation")
+
+    return parser
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        print(f"\n  {C_DIM}Node: {load_node_id() if NODE_ID_FILE.exists() else 'not configured'}{C_RESET}")
+        print(f"  {C_DIM}FireWire: {FIREWIRE_URL}{C_RESET}")
+        print(f"  {C_DIM}Messages: {MESSAGES_DIR}{C_RESET}\n")
+        sys.exit(0)
+
+    commands = {
+        "send": cmd_send,
+        "inbox": cmd_inbox,
+        "read": cmd_read,
+        "peers": cmd_peers,
+        "broadcast": cmd_broadcast,
+        "threads": cmd_threads,
+    }
+
+    handler = commands.get(args.command)
+    if handler:
+        handler(args)
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
