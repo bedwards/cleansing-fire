@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cleansing-fire/specs/plugin-schema.json",
+  "title": "Cleansing Fire Plugin Interface",
+  "description": "JSON Schema defining the contract that all Cleansing Fire plugins MUST implement. Plugins are executable scripts that accept JSON on stdin, produce JSON on stdout, and use exit codes to signal success or failure. This schema defines the envelope formats -- individual plugins define their own action-specific payloads within this envelope.",
+  "version": "0.1.0",
+  "updated": "2026-02-28",
+
+  "$defs": {
+
+    "plugin_input": {
+      "title": "Plugin Input Envelope",
+      "description": "The JSON object that a plugin receives on stdin. Every plugin input MUST include an 'action' field specifying which operation to perform. Additional fields are action-specific.",
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "The operation to perform. Each plugin defines its own set of valid actions. The plugin MUST return an error if the action is not recognized.",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "plugin_output_success": {
+      "title": "Plugin Output (Success)",
+      "description": "The JSON object a plugin writes to stdout on success (exit code 0). The shape depends on the action, but MUST be a valid JSON object. MUST NOT contain an 'error' field at the top level.",
+      "type": "object",
+      "not": {
+        "required": ["error"]
+      }
+    },
+
+    "plugin_output_error": {
+      "title": "Plugin Output (Error)",
+      "description": "The JSON object a plugin writes to stdout on failure (exit code non-zero). MUST contain an 'error' field with a human-readable error message.",
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "string",
+          "description": "Human-readable error message describing what went wrong.",
+          "minLength": 1
+        },
+        "error_code": {
+          "type": "string",
+          "description": "Optional machine-readable error code for programmatic handling.",
+          "enum": [
+            "INVALID_INPUT",
+            "MISSING_FIELD",
+            "UNKNOWN_ACTION",
+            "API_ERROR",
+            "API_KEY_MISSING",
+            "TIMEOUT",
+            "GATEKEEPER_UNAVAILABLE",
+            "GATEKEEPER_REJECTED",
+            "PLUGIN_DEPENDENCY_FAILED",
+            "INTERNAL_ERROR"
+          ]
+        },
+        "details": {
+          "type": "object",
+          "description": "Optional additional context about the error.",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "gatekeeper_request": {
+      "title": "Gatekeeper LLM Request",
+      "description": "The payload format for plugins that call the gatekeeper daemon for LLM tasks. Submitted as POST to http://127.0.0.1:7800/submit-sync.",
+      "type": "object",
+      "required": ["prompt", "caller"],
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "The prompt to send to the LLM.",
+          "minLength": 1
+        },
+        "system": {
+          "type": "string",
+          "description": "Optional system prompt to set LLM behavior.",
+          "default": ""
+        },
+        "caller": {
+          "type": "string",
+          "description": "Identifier for the calling plugin. Format: 'plugin:<plugin-name>'.",
+          "pattern": "^plugin:[a-z][a-z0-9-]*$"
+        },
+        "temperature": {
+          "type": "number",
+          "description": "LLM temperature. Lower = more deterministic.",
+          "minimum": 0.0,
+          "maximum": 2.0,
+          "default": 0.7
+        },
+        "max_tokens": {
+          "type": "integer",
+          "description": "Maximum tokens in the LLM response.",
+          "minimum": 1,
+          "maximum": 32768,
+          "default": 4096
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for the LLM request.",
+          "minimum": 1,
+          "maximum": 600,
+          "default": 120
+        },
+        "model": {
+          "type": "string",
+          "description": "Optional model override. Default is the gatekeeper's configured model (mistral-large:123b)."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "gatekeeper_response": {
+      "title": "Gatekeeper LLM Response",
+      "description": "The response format from the gatekeeper daemon's /submit-sync endpoint.",
+      "type": "object",
+      "required": ["id", "status"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique task ID."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["queued", "running", "completed", "failed", "rejected"],
+          "description": "Current task status."
+        },
+        "result": {
+          "type": "string",
+          "description": "LLM response text. Present when status is 'completed'."
+        },
+        "error": {
+          "type": "string",
+          "description": "Error message. Present when status is 'failed' or 'rejected'."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "plugin_manifest": {
+      "title": "Plugin Manifest",
+      "description": "Metadata about a plugin that could be embedded as a header comment or provided as a sidecar file. This is the RECOMMENDED structure for plugin self-description, not yet enforced.",
+      "type": "object",
+      "required": ["name", "category", "description", "actions"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Plugin name matching the filename (e.g., 'civic-legiscan').",
+          "pattern": "^[a-z][a-z0-9]*-[a-z][a-z0-9-]*$"
+        },
+        "category": {
+          "type": "string",
+          "description": "Plugin category, matching the filename prefix.",
+          "enum": ["civic", "forge", "pipeline", "osint", "media", "example"]
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this plugin does."
+        },
+        "actions": {
+          "type": "array",
+          "description": "List of actions this plugin supports.",
+          "items": {
+            "type": "object",
+            "required": ["name", "description"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Action name, matching the 'action' field in input."
+              },
+              "description": {
+                "type": "string",
+                "description": "What this action does."
+              },
+              "input_schema": {
+                "type": "object",
+                "description": "JSON Schema for this action's input (excluding the 'action' field)."
+              },
+              "output_schema": {
+                "type": "object",
+                "description": "JSON Schema for this action's output on success."
+              }
+            },
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "requires_env": {
+          "type": "array",
+          "description": "Environment variables this plugin requires.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "uses_gatekeeper": {
+          "type": "boolean",
+          "description": "Whether this plugin calls the gatekeeper daemon for LLM tasks.",
+          "default": false
+        },
+        "calls_plugins": {
+          "type": "array",
+          "description": "Other plugins this plugin invokes.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+
+  "description_extended": {
+    "execution_contract": {
+      "invocation": "The plugin executable is called with no arguments. Input is provided on stdin as a single JSON object. The plugin MUST read all of stdin before processing.",
+      "output": "The plugin MUST write exactly one JSON object to stdout. No other output on stdout. Diagnostic/debug output goes to stderr.",
+      "exit_codes": {
+        "0": "Success. stdout contains the result JSON (MUST NOT have top-level 'error' field).",
+        "1": "Failure. stdout contains error JSON (MUST have top-level 'error' field).",
+        "2": "Invalid input. stdout contains error JSON with error_code 'INVALID_INPUT'."
+      },
+      "environment": {
+        "CF_PROJECT_DIR": "Absolute path to the project root. Always set by the caller.",
+        "PATH": "Standard PATH. Plugins should not assume specific PATH entries.",
+        "API keys": "Plugin-specific API keys (e.g., LEGISCAN_API_KEY, FEC_API_KEY) are passed via environment variables. Plugins MUST check for required keys and return a clear error if missing."
+      },
+      "timeouts": "Callers (scheduler, pipeline) set a timeout. Default is 200 seconds. Plugins should complete well within this. Gatekeeper calls have their own timeout (default 120s).",
+      "idempotency": "Plugins SHOULD be idempotent -- calling with the same input should produce the same output (modulo external API changes). Plugins MUST NOT have destructive side effects.",
+      "concurrency": "Multiple instances of the same plugin MAY run concurrently. Plugins MUST NOT assume exclusive access to any resource except their own stdin/stdout/stderr."
+    },
+    "naming_convention": {
+      "format": "<category>-<name>",
+      "categories": {
+        "civic": "Government data, legislation, campaign finance, spending",
+        "forge": "Content generation -- visual, textual, multimedia",
+        "pipeline": "Orchestration plugins that compose other plugins",
+        "osint": "Open source intelligence gathering",
+        "media": "Distribution to social media, newsletters, etc.",
+        "example": "Example/template plugins for reference"
+      },
+      "examples": [
+        "civic-foia-generator",
+        "osint-corporate-lookup",
+        "media-fediverse-post",
+        "forge-audio-narration"
+      ]
+    }
+  }
+}

@@ -4,30 +4,67 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cleansing Fire — Pyrrhic Lucidity</title>
-<meta name="description" content="A philosophy of contested liberation for the age of systemic capture. See clearly. Act anyway. Bear the cost.">
+<meta name="description" content="Decentralized technology to shift power from corrupt concentrated authority toward the people. See clearly. Act anyway. Bear the cost.">
+<meta name="theme-color" content="#ff4400">
+<meta property="og:title" content="Cleansing Fire — Pyrrhic Lucidity">
+<meta property="og:description" content="A philosophy of contested liberation for the age of systemic capture.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔥</text></svg>">
 <style>
   :root {
     --fire-1: #ff4400;
     --fire-2: #ff8800;
     --fire-3: #ffcc00;
     --ember: #331100;
-    --ash: #888;
-    --smoke: #333;
+    --ash: #999;
+    --smoke: #555;
     --night: #0a0a0a;
     --bone: #eee;
+    --focus: #00ccff;
+    --font-body: 'Georgia', 'Times New Roman', serif;
+    --font-mono: 'Courier New', 'Consolas', monospace;
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --max-width: 860px;
   }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* High Contrast Mode */
+  .high-contrast {
+    --night: #000;
+    --bone: #fff;
+    --ash: #ccc;
+    --smoke: #aaa;
+  }
+  .high-contrast .card { background: #000; border-color: var(--fire-2); }
+  .high-contrast .principle { background: rgba(255,68,0,0.1); }
+
+  /* Reset */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* Skip link */
+  .skip-link {
+    position: absolute; top: -100%; left: 50%; transform: translateX(-50%);
+    background: var(--fire-1); color: #fff; padding: 0.75rem 1.5rem;
+    font-family: var(--font-ui); font-size: 1rem; z-index: 1000;
+    border-radius: 0 0 8px 8px; text-decoration: none;
+  }
+  .skip-link:focus { top: 0; }
 
   body {
     background: var(--night);
     color: var(--bone);
-    font-family: 'Georgia', 'Times New Roman', serif;
-    line-height: 1.7;
+    font-family: var(--font-body);
+    line-height: 1.8;
     overflow-x: hidden;
+    font-size: 1.05rem;
   }
 
-  /* Fire animation */
+  /* Focus styles for keyboard navigation */
+  :focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 3px;
+  }
+
+  /* Animations */
   @keyframes flicker {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.8; }
@@ -36,26 +73,101 @@
     0% { transform: translateY(0) scale(1); opacity: 0.7; }
     100% { transform: translateY(-100vh) scale(0.3); opacity: 0; }
   }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+    .ember-field { display: none; }
+  }
+
+  /* Ember particles */
   .ember-field {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     pointer-events: none; z-index: 0; overflow: hidden;
   }
-  .ember {
+  .ember-field[aria-hidden="true"] { display: none; }
+  .ember-particle {
     position: absolute; bottom: -10px;
     width: 3px; height: 3px; border-radius: 50%;
     background: var(--fire-2);
     animation: rise linear infinite;
   }
 
+  /* Top toolbar */
+  .toolbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(10,10,10,0.95); backdrop-filter: blur(10px);
+    border-bottom: 1px solid #222;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.5rem 1rem;
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    transform: translateY(-100%);
+    transition: transform 0.3s;
+  }
+  .toolbar.visible { transform: translateY(0); }
+  .toolbar-brand {
+    color: var(--fire-2); font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; font-size: 0.75rem;
+  }
+  .toolbar-actions { display: flex; gap: 0.5rem; align-items: center; }
+  .toolbar-btn {
+    background: #222; color: var(--bone); border: 1px solid #333;
+    padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.8rem; font-family: var(--font-ui);
+    transition: all 0.2s;
+  }
+  .toolbar-btn:hover { border-color: var(--fire-1); color: var(--fire-3); }
+  .toolbar-btn.active { background: var(--fire-1); color: #fff; border-color: var(--fire-1); }
+
+  /* Navigation */
+  nav {
+    position: relative; z-index: 1;
+    max-width: var(--max-width); margin: 0 auto;
+    padding: 1rem 2rem;
+  }
+  .nav-toggle {
+    display: none; background: none; border: 2px solid var(--fire-1);
+    color: var(--fire-2); padding: 0.5rem 1rem; cursor: pointer;
+    font-family: var(--font-ui); font-size: 0.9rem;
+  }
+  .nav-links {
+    display: flex; flex-wrap: wrap; gap: 0.5rem;
+    list-style: none; padding: 1rem 0;
+  }
+  .nav-links a {
+    display: inline-block; padding: 0.4rem 0.8rem;
+    color: var(--ash); font-family: var(--font-ui); font-size: 0.85rem;
+    text-decoration: none; border: 1px solid transparent; border-radius: 4px;
+    transition: all 0.2s;
+  }
+  .nav-links a:hover, .nav-links a:focus { color: var(--fire-3); border-color: var(--fire-1); }
+  .nav-links a[aria-current="page"] { color: var(--fire-2); border-color: var(--fire-1); background: rgba(255,68,0,0.1); }
+
+  @media (max-width: 700px) {
+    .nav-toggle { display: block; }
+    .nav-links { display: none; flex-direction: column; }
+    .nav-links.open { display: flex; }
+  }
+
   /* Layout */
-  .content { position: relative; z-index: 1; max-width: 800px; margin: 0 auto; padding: 2rem; }
+  .content {
+    position: relative; z-index: 1;
+    max-width: var(--max-width); margin: 0 auto; padding: 0 2rem 2rem;
+  }
 
   /* Hero */
   .hero {
-    min-height: 100vh; display: flex; flex-direction: column;
+    min-height: 90vh; display: flex; flex-direction: column;
     justify-content: center; align-items: center; text-align: center;
-    padding: 2rem;
+    padding: 6rem 2rem 4rem; position: relative; z-index: 1;
   }
   .hero h1 {
     font-size: clamp(2.5rem, 8vw, 5rem);
@@ -72,17 +184,20 @@
   }
   .hero .epigraph {
     max-width: 600px; margin: 3rem auto; padding: 2rem;
-    border-left: 2px solid var(--fire-1); color: var(--ash);
-    font-size: 1rem;
+    border-left: 3px solid var(--fire-1); color: var(--ash);
+    font-size: 1.05rem; text-align: left;
   }
 
   /* Sections */
-  section { padding: 4rem 0; border-top: 1px solid #222; }
+  section {
+    padding: 4rem 0; border-top: 1px solid #222;
+    animation: fadeIn 0.6s ease-out;
+  }
   h2 {
     font-size: 1.8rem; font-weight: 300; letter-spacing: 0.15em;
     color: var(--fire-2); margin-bottom: 2rem; text-transform: uppercase;
   }
-  h3 { color: var(--fire-3); font-size: 1.1rem; margin: 2rem 0 0.5rem; font-weight: 600; }
+  h3 { color: var(--fire-3); font-size: 1.15rem; margin: 2rem 0 0.5rem; font-weight: 600; }
   p { margin-bottom: 1.2rem; color: #ccc; }
   strong { color: var(--fire-3); font-weight: 600; }
   a { color: var(--fire-2); text-decoration: none; border-bottom: 1px solid var(--fire-1); }
@@ -93,22 +208,29 @@
     padding: 1.5rem; margin: 1rem 0;
     border-left: 3px solid var(--fire-1);
     background: rgba(255, 68, 0, 0.03);
+    transition: background 0.3s;
   }
+  .principle:hover { background: rgba(255, 68, 0, 0.06); }
   .principle-number {
     font-size: 0.8rem; color: var(--fire-1);
     letter-spacing: 0.2em; text-transform: uppercase;
+    font-family: var(--font-ui);
   }
   .principle-name { font-size: 1.2rem; color: var(--fire-3); margin: 0.3rem 0; }
   .principle-text { color: var(--ash); font-size: 0.95rem; }
 
   /* Grid */
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin: 2rem 0; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1.5rem; margin: 2rem 0;
+  }
   .card {
     padding: 1.5rem; background: #111; border: 1px solid #222;
-    transition: border-color 0.3s;
+    transition: border-color 0.3s, transform 0.2s;
   }
-  .card:hover { border-color: var(--fire-1); }
-  .card h4 { color: var(--fire-2); margin-bottom: 0.5rem; }
+  .card:hover { border-color: var(--fire-1); transform: translateY(-2px); }
+  .card h4 { color: var(--fire-2); margin-bottom: 0.5rem; font-family: var(--font-ui); }
   .card p { font-size: 0.9rem; color: var(--ash); margin: 0; }
 
   /* Motto */
@@ -117,53 +239,168 @@
     color: var(--fire-3); font-style: italic; letter-spacing: 0.05em;
   }
 
+  /* AI Chat */
+  .ai-chat {
+    max-width: var(--max-width); margin: 0 auto; padding: 0 2rem 2rem;
+    position: relative; z-index: 1;
+  }
+  .chat-container {
+    background: #111; border: 1px solid #222; border-radius: 8px;
+    overflow: hidden;
+  }
+  .chat-header {
+    padding: 1rem; border-bottom: 1px solid #222;
+    font-family: var(--font-ui); font-size: 0.9rem;
+    color: var(--fire-2); display: flex; align-items: center; gap: 0.5rem;
+  }
+  .chat-header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fire-1); }
+  .chat-messages {
+    padding: 1rem; min-height: 200px; max-height: 400px;
+    overflow-y: auto; font-size: 0.95rem;
+  }
+  .chat-msg {
+    margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px;
+    max-width: 85%; line-height: 1.6;
+  }
+  .chat-msg.system { background: rgba(255,68,0,0.1); color: var(--ash); font-style: italic; }
+  .chat-msg.user { background: #1a1a1a; color: var(--bone); margin-left: auto; }
+  .chat-msg.ai { background: #0d1117; color: #ccc; border-left: 2px solid var(--fire-1); }
+  .chat-input-area {
+    display: flex; border-top: 1px solid #222;
+  }
+  .chat-input {
+    flex: 1; background: #0a0a0a; border: none; color: var(--bone);
+    padding: 1rem; font-family: var(--font-body); font-size: 0.95rem;
+  }
+  .chat-input:focus { outline: none; background: #111; }
+  .chat-input::placeholder { color: var(--smoke); }
+  .chat-send {
+    background: var(--fire-1); color: #fff; border: none;
+    padding: 1rem 1.5rem; cursor: pointer; font-family: var(--font-ui);
+    font-weight: 700; transition: background 0.2s;
+  }
+  .chat-send:hover { background: var(--fire-2); }
+  .chat-send:disabled { background: #333; cursor: not-allowed; }
+
+  /* Research Library */
+  .library-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem; margin: 2rem 0;
+  }
+  .library-card {
+    padding: 1.5rem; background: #111; border: 1px solid #222;
+    transition: all 0.3s; position: relative; overflow: hidden;
+  }
+  .library-card:hover { border-color: var(--fire-1); transform: translateY(-2px); }
+  .library-card .tag {
+    display: inline-block; font-family: var(--font-ui); font-size: 0.7rem;
+    padding: 0.15rem 0.5rem; border-radius: 3px; margin-bottom: 0.5rem;
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
+  .tag-philosophy { background: #5319e7; color: #fff; }
+  .tag-economics { background: #0e8a16; color: #fff; }
+  .tag-history { background: #d93f0b; color: #fff; }
+  .tag-tech { background: #1d76db; color: #fff; }
+  .tag-culture { background: #f9d0c4; color: #000; }
+  .tag-osint { background: #b60205; color: #fff; }
+  .tag-satire { background: #fbca04; color: #000; }
+  .library-card h4 { color: var(--fire-2); margin-bottom: 0.5rem; font-family: var(--font-ui); }
+  .library-card p { font-size: 0.85rem; color: var(--ash); margin: 0 0 0.5rem; }
+  .library-card .meta { font-size: 0.75rem; color: var(--smoke); font-family: var(--font-ui); }
+
+  /* TTS indicator */
+  .tts-reading { outline: 2px dashed var(--fire-2); outline-offset: 4px; }
+
   /* Footer */
   footer {
     text-align: center; padding: 3rem; color: var(--smoke);
     font-size: 0.85rem; border-top: 1px solid #222;
+    position: relative; z-index: 1;
   }
   footer a { color: var(--fire-1); }
 
-  /* Code */
-  code {
-    font-family: 'Courier New', monospace; background: #111;
-    padding: 0.15rem 0.4rem; font-size: 0.9rem; color: var(--fire-2);
-  }
-  pre {
-    background: #111; padding: 1.5rem; overflow-x: auto;
-    border: 1px solid #222; margin: 1rem 0; font-size: 0.85rem;
-    line-height: 1.5;
-  }
-  pre code { background: none; padding: 0; }
-
   /* Responsive */
   @media (max-width: 600px) {
-    .content { padding: 1rem; }
+    .content, .ai-chat { padding: 0 1rem 1rem; }
+    .hero { padding: 5rem 1rem 3rem; }
     .hero .epigraph { padding: 1rem; }
+    nav { padding: 0.5rem 1rem; }
+    .grid, .library-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Print */
+  @media print {
+    .ember-field, .toolbar, .ai-chat, .chat-container { display: none !important; }
+    body { background: #fff; color: #000; }
+    h2, h3, .principle-name { color: #333; }
+    a { color: #000; border-bottom: 1px solid #000; }
   }
 </style>
 </head>
 <body>
 
-<!-- Floating embers -->
-<div class="ember-field" id="embers"></div>
+<!-- Skip navigation for screen readers -->
+<a href="#main-content" class="skip-link">Skip to main content</a>
 
-<!-- Hero -->
-<div class="hero">
-  <h1>Cleansing Fire</h1>
-  <div class="subtitle">Pyrrhic Lucidity — A Philosophy of Contested Liberation</div>
-  <div class="epigraph">
-    The critic is compromised. The tools are contaminated.<br>
-    The audience is captured. And action is still required.<br><br>
-    <em>See clearly. Act anyway. Bear the cost.</em>
+<!-- Floating embers (decorative) -->
+<div class="ember-field" id="embers" aria-hidden="true"></div>
+
+<!-- Toolbar (appears on scroll) -->
+<div class="toolbar" id="toolbar" role="toolbar" aria-label="Page tools">
+  <span class="toolbar-brand">Cleansing Fire</span>
+  <div class="toolbar-actions">
+    <button class="toolbar-btn" id="btn-tts" aria-label="Read page aloud" title="Text to Speech">
+      &#9654; Listen
+    </button>
+    <button class="toolbar-btn" id="btn-contrast" aria-label="Toggle high contrast" title="High Contrast">
+      &#9681; Contrast
+    </button>
+    <button class="toolbar-btn" id="btn-embers" aria-label="Toggle animations" title="Toggle Embers">
+      &#10045; Embers
+    </button>
+    <button class="toolbar-btn" id="btn-font-up" aria-label="Increase font size" title="Larger Text">
+      A+
+    </button>
+    <button class="toolbar-btn" id="btn-font-down" aria-label="Decrease font size" title="Smaller Text">
+      A-
+    </button>
   </div>
 </div>
 
+<!-- Navigation -->
+<nav aria-label="Main navigation">
+  <button class="nav-toggle" aria-expanded="false" aria-controls="nav-links" id="nav-toggle">
+    Menu
+  </button>
+  <ul class="nav-links" id="nav-links" role="list">
+    <li><a href="#main-content" aria-current="page">Home</a></li>
+    <li><a href="#principles">Principles</a></li>
+    <li><a href="#build">What We Build</a></li>
+    <li><a href="#library">Research Library</a></li>
+    <li><a href="#ai-assistant">Ask the Fire</a></li>
+    <li><a href="getting-started.html">Get Started</a></li>
+    <li><a href="https://github.com/bedwards/cleansing-fire">GitHub</a></li>
+  </ul>
+</nav>
+
+<!-- Hero -->
+<header class="hero" role="banner">
+  <h1>Cleansing Fire</h1>
+  <p class="subtitle">Pyrrhic Lucidity — A Philosophy of Contested Liberation</p>
+  <blockquote class="epigraph">
+    The critic is compromised. The tools are contaminated.<br>
+    The audience is captured. And action is still required.<br><br>
+    <em>See clearly. Act anyway. Bear the cost.</em>
+  </blockquote>
+</header>
+
+<main id="main-content">
 <div class="content">
 
 <!-- What Is This -->
-<section>
-  <h2>What Is This</h2>
+<section aria-labelledby="what-heading">
+  <h2 id="what-heading">What Is This</h2>
   <p>
     Cleansing Fire is an open-source project building <strong>decentralized technology
     to shift power from corrupt concentrated authority toward the people</strong>.
@@ -181,49 +418,54 @@
     mechanisms by which power operates invisibly, maintains itself through information control,
     insulates itself from accountability, and concentrates beyond justification.
   </p>
+  <p>
+    <strong>Most power now lives outside government.</strong> In private equity firms that own your hospital.
+    In tech platforms that curate your reality. In dark money networks that buy policy without fingerprints.
+    In media conglomerates that decide what you're allowed to know. This project sees all of it.
+  </p>
 </section>
 
 <!-- Seven Principles -->
-<section>
-  <h2>The Seven Principles</h2>
+<section id="principles" aria-labelledby="principles-heading">
+  <h2 id="principles-heading">The Seven Principles</h2>
 
-  <div class="principle">
+  <div class="principle" role="article">
     <div class="principle-number">Principle I</div>
     <div class="principle-name">Lucidity Before Liberation</div>
     <div class="principle-text">The first obligation is not to be free but to see clearly, including seeing the ways your own seeing is distorted. If you cannot name three ways you might be wrong, you are almost certainly captured.</div>
   </div>
 
-  <div class="principle">
+  <div class="principle" role="article">
     <div class="principle-number">Principle II</div>
     <div class="principle-name">Relational Agency Over Sovereign Autonomy</div>
     <div class="principle-text">The unit of action is not the individual but the relationship pattern. I do not think independently, but the pattern of interaction between us can produce thought none of us would produce alone.</div>
   </div>
 
-  <div class="principle">
+  <div class="principle" role="article">
     <div class="principle-number">Principle III</div>
     <div class="principle-name">Transparent Mechanism Over Trusted Authority</div>
     <div class="principle-text">Legitimacy requires visible, comprehensible, alterable mechanisms — not trust in the character of those who operate them. Any authority that cannot survive full transparency of its operations is illegitimate.</div>
   </div>
 
-  <div class="principle">
+  <div class="principle" role="article">
     <div class="principle-number">Principle IV</div>
     <div class="principle-name">Adversarial Collaboration</div>
     <div class="principle-text">Groups that cannot tolerate structured dissent are already captured. Internal challenge is not a threat to be managed but the immune system that prevents organizational decay.</div>
   </div>
 
-  <div class="principle">
+  <div class="principle" role="article">
     <div class="principle-number">Principle V</div>
     <div class="principle-name">Minimum Viable Coercion</div>
     <div class="principle-text">Coercion is sometimes necessary, always corrupting, and must face continuous minimization pressure. Every use of force must be bounded, reviewed, and justified against less coercive alternatives.</div>
   </div>
 
-  <div class="principle">
+  <div class="principle" role="article">
     <div class="principle-number">Principle VI</div>
     <div class="principle-name">Recursive Accountability</div>
     <div class="principle-text">Those who exercise power in the name of liberation must be subject to accountability at least as rigorous as what they seek to impose. The liberator who exempts themselves has already become the tyrant.</div>
   </div>
 
-  <div class="principle">
+  <div class="principle" role="article">
     <div class="principle-number">Principle VII</div>
     <div class="principle-name">Differential Solidarity</div>
     <div class="principle-text">Give differential attention and weight to those most exposed to concentrated power — not as moral category but as epistemic resource. The person inside the machine sees gears invisible from outside.</div>
@@ -231,57 +473,179 @@
 </section>
 
 <!-- What We Build -->
-<section>
-  <h2>What We Build</h2>
-  <div class="grid">
-    <div class="card">
-      <h4>Civic Intelligence</h4>
-      <p>AI agents that monitor legislation, track campaign finance, cross-reference government contracts, and make corruption visible in real-time across all 50 states.</p>
+<section id="build" aria-labelledby="build-heading">
+  <h2 id="build-heading">What We Build</h2>
+  <div class="grid" role="list">
+    <div class="card" role="listitem">
+      <h4>Civic &amp; Corporate Intelligence</h4>
+      <p>AI agents that monitor legislation, track campaign finance, cross-reference government contracts, map corporate power networks, trace beneficial ownership, and make corruption visible — in government <em>and</em> private power alike.</p>
     </div>
-    <div class="card">
+    <div class="card" role="listitem">
       <h4>The Gatekeeper</h4>
       <p>Local AI infrastructure. Your own LLM running on your own hardware. No cloud. No surveillance. No permission needed. GPU-serialized for efficiency.</p>
     </div>
-    <div class="card">
+    <div class="card" role="listitem">
       <h4>The Forge</h4>
-      <p>Data becomes art. Corruption data becomes SVG visualizations, poetry, social media threads, agitprop. The truth, made beautiful and shareable.</p>
+      <p>Data becomes art. Corruption data becomes SVG visualizations, poetry, social media threads, satire, agitprop. The truth, made beautiful, funny, and shareable.</p>
     </div>
-    <div class="card">
-      <h4>Federation Protocol</h4>
+    <div class="card" role="listitem">
+      <h4>FireWire Protocol</h4>
       <p>How autonomous systems worldwide coordinate without central control. Human nodes and AI agent nodes with equal standing. Resilient to attack, censorship, and capture.</p>
     </div>
-    <div class="card">
+    <div class="card" role="listitem">
+      <h4>OSINT Pipeline</h4>
+      <p>Open-source intelligence collection at scale. SEC filings, court records, corporate networks, beneficial ownership chains. Follow the money while you sleep.</p>
+    </div>
+    <div class="card" role="listitem">
+      <h4>The Ember Economy</h4>
+      <p>A new economic model with built-in power decay. Demurrage currency at three scales. Wealth has term limits. Redistribution is structural, not political. Accumulation prevented by design.</p>
+    </div>
+    <div class="card" role="listitem">
+      <h4>The Satire Engine</h4>
+      <p>Corporate doublespeak translator. Corruption mad libs with real data. Meme generation. Parody press releases. Because ridicule is power's most feared enemy.</p>
+    </div>
+    <div class="card" role="listitem">
       <h4>Autonomous Agents</h4>
       <p>AI systems that run 24/7 — filing FOIA requests, analyzing legislative changes, investigating money flows, generating content, coordinating action. While you sleep, they watch.</p>
-    </div>
-    <div class="card">
-      <h4>New Economics</h4>
-      <p>An economic model with built-in power decay. Wealth has term limits. Redistribution is structural, not political. The system prevents accumulation by design.</p>
     </div>
   </div>
 </section>
 
-<div class="motto">
+<div class="motto" role="complementary">
   "Every dataset is a story. Every dollar traced is a poem.<br>
   Every vote recorded is a verse. The forge turns transparency into narrative."
 </div>
 
 <!-- The Meta-Pattern -->
-<section>
-  <h2>The Meta-Pattern</h2>
+<section aria-labelledby="pattern-heading">
+  <h2 id="pattern-heading">The Meta-Pattern</h2>
   <p>History teaches that successful power rebalancing follows five steps. Technology can accelerate each one but cannot skip any:</p>
-  <div class="grid">
-    <div class="card"><h4>1. Exposure</h4><p>Make the unjust concentration of power visible and legible.</p></div>
-    <div class="card"><h4>2. Organization</h4><p>Build collective capacity to act — the step most often skipped.</p></div>
-    <div class="card"><h4>3. Disruption</h4><p>Impose costs that make the status quo unsustainable.</p></div>
-    <div class="card"><h4>4. Institutionalization</h4><p>Encode changes in durable structures.</p></div>
-    <div class="card"><h4>5. Defense</h4><p>Maintain capacity to resist rollback.</p></div>
+  <div class="grid" role="list">
+    <div class="card" role="listitem"><h4>1. Exposure</h4><p>Make the unjust concentration of power visible and legible.</p></div>
+    <div class="card" role="listitem"><h4>2. Organization</h4><p>Build collective capacity to act — the step most often skipped.</p></div>
+    <div class="card" role="listitem"><h4>3. Disruption</h4><p>Impose costs that make the status quo unsustainable.</p></div>
+    <div class="card" role="listitem"><h4>4. Institutionalization</h4><p>Encode changes in durable structures.</p></div>
+    <div class="card" role="listitem"><h4>5. Defense</h4><p>Maintain capacity to resist rollback.</p></div>
   </div>
 </section>
 
+<!-- Research Library -->
+<section id="library" aria-labelledby="library-heading">
+  <h2 id="library-heading">Research Library</h2>
+  <p>Deep research across every domain this project touches. Each document is a living investigation — read, critique, extend.</p>
+  <div class="library-grid" role="list">
+    <a href="philosophy.md" class="library-card" role="listitem">
+      <span class="tag tag-philosophy">Philosophy</span>
+      <h4>Pyrrhic Lucidity</h4>
+      <p>The full philosophical framework. 7 principles, decision calculus, theory of legitimate power, anti-co-optation mechanisms.</p>
+      <span class="meta">956 lines — the foundation</span>
+    </a>
+    <a href="economics.md" class="library-card" role="listitem">
+      <span class="tag tag-economics">Economics</span>
+      <h4>The Ember Economy</h4>
+      <p>Decentralized economic model with demurrage currency, commons protocol, production mesh, structural redistribution cycles.</p>
+      <span class="meta">1,675 lines — Graeber, Ostrom, Gesell, Raworth</span>
+    </a>
+    <a href="historical-research.md" class="library-card" role="listitem">
+      <span class="tag tag-history">History</span>
+      <h4>Power Rebalancing Through History</h4>
+      <p>What has actually worked to shift power? Movements, reforms, information revolutions, and critical failures.</p>
+      <span class="meta">1,197 lines — 7-part analysis</span>
+    </a>
+    <a href="technology-research.md" class="library-card" role="listitem">
+      <span class="tag tag-tech">Technology</span>
+      <h4>Technology Landscape</h4>
+      <p>What cheap, deployable tech exists for civic action? APIs, tools, platforms, and the gaps we need to fill.</p>
+      <span class="meta">773 lines — 8 sections + appendices</span>
+    </a>
+    <a href="decentralized-systems.md" class="library-card" role="listitem">
+      <span class="tag tag-tech">Technology</span>
+      <h4>Decentralized Systems</h4>
+      <p>TCP/IP, biological networks, historical governance, power cycling mechanisms, failure modes, design synthesis.</p>
+      <span class="meta">Network + biological + governance</span>
+    </a>
+    <a href="federation-protocol.md" class="library-card" role="listitem">
+      <span class="tag tag-tech">Technology</span>
+      <h4>FireWire Protocol</h4>
+      <p>Federation protocol for autonomous AI agents and humans to coordinate civic intelligence without central authority.</p>
+      <span class="meta">1,829 lines — full specification</span>
+    </a>
+    <a href="literary-arsenal.md" class="library-card" role="listitem">
+      <span class="tag tag-culture">Culture</span>
+      <h4>Literary Arsenal</h4>
+      <p>Mottos, slogans, poems, manifestos, narrative frameworks, metaphor lexicon, songs. Art as weapon.</p>
+      <span class="meta">13 mottos, 6 poems, 4 manifestos, 4 songs</span>
+    </a>
+    <a href="corporate-power-map.md" class="library-card" role="listitem">
+      <span class="tag tag-osint">OSINT</span>
+      <h4>Corporate Power Map</h4>
+      <p>Where power actually lives now. Private equity, tech platforms, dark money, media conglomerates, financial system control.</p>
+      <span class="meta">In progress — data sources + tools</span>
+    </a>
+    <a href="intelligence-and-osint.md" class="library-card" role="listitem">
+      <span class="tag tag-osint">OSINT</span>
+      <h4>Intelligence &amp; OSINT</h4>
+      <p>Open source intelligence, investigative techniques, whistleblower infrastructure, counter-intelligence for activists.</p>
+      <span class="meta">In progress — Bellingcat + ICIJ methods</span>
+    </a>
+    <a href="humor-and-satire.md" class="library-card" role="listitem">
+      <span class="tag tag-satire">Satire</span>
+      <h4>Humor &amp; Satire</h4>
+      <p>Why humor is power's greatest enemy. Historical satire, modern meme warfare, the technology of comedy, satire engine design.</p>
+      <span class="meta">In progress — Alinsky to Anonymous</span>
+    </a>
+    <a href="dual-documentation.md" class="library-card" role="listitem">
+      <span class="tag tag-tech">Technology</span>
+      <h4>Dual Documentation</h4>
+      <p>How to document for humans and AI simultaneously. Machine-parseable specs alongside narrative guides.</p>
+      <span class="meta">Architecture for human + AI docs</span>
+    </a>
+    <a href="multimedia-tools.md" class="library-card" role="listitem">
+      <span class="tag tag-culture">Culture</span>
+      <h4>Multimedia Tools</h4>
+      <p>Image, video, audio, and interactive content generation tools. SVG, Canvas, Web Audio, Ollama FLUX integration.</p>
+      <span class="meta">Generation tools research</span>
+    </a>
+  </div>
+</section>
+
+<!-- AI Assistant -->
+<section id="ai-assistant" aria-labelledby="ai-heading">
+  <h2 id="ai-heading">Ask the Fire</h2>
+  <p>Ask questions about the project, the philosophy, the research, or what you can do to help.
+  Powered by Gemini. Grounded in Pyrrhic Lucidity.</p>
+</section>
+</div>
+
+<div class="ai-chat">
+  <div class="chat-container" role="region" aria-label="AI Assistant Chat">
+    <div class="chat-header">
+      <span class="dot" aria-hidden="true"></span>
+      <span>The Fire Speaks — AI Assistant</span>
+    </div>
+    <div class="chat-messages" id="chat-messages" aria-live="polite" aria-atomic="false">
+      <div class="chat-msg system">
+        Contaminated, and still answering. Ask me about the project, the philosophy,
+        the economics, the technology, or how to get involved. I'll be honest about
+        what I don't know.
+      </div>
+    </div>
+    <form class="chat-input-area" id="chat-form" aria-label="Chat input">
+      <label for="chat-input" class="sr-only">Your message</label>
+      <input type="text" id="chat-input" class="chat-input"
+        placeholder="Ask anything about Cleansing Fire..."
+        autocomplete="off" aria-label="Type your question">
+      <button type="submit" class="chat-send" id="chat-send" aria-label="Send message">
+        Send
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="content">
 <!-- Join -->
-<section>
-  <h2>The Fire Is Already Lit</h2>
+<section aria-labelledby="join-heading">
+  <h2 id="join-heading">The Fire Is Already Lit</h2>
   <p>
     This is not a spectator project. We are building infrastructure for a world that
     has never existed. Every node strengthens the network. Every agent expands our reach.
@@ -292,11 +656,17 @@
     it is the starting condition. The discipline is not purity but movement along the
     corruption gradient. Come as you are. Bring your bots.
   </p>
+  <h3>Getting Started</h3>
   <p>
-    <a href="https://github.com/bedwards/cleansing-fire">GitHub Repository</a> ·
-    <a href="philosophy.md">Full Philosophy</a> ·
-    <a href="technology-research.md">Technology Research</a> ·
-    <a href="historical-research.md">Historical Research</a>
+    The human interface to this system is <strong>Claude Code CLI</strong>. Install it, clone the repo,
+    and run <code>claude</code> in the project directory. Claude reads the project context and becomes
+    your guide. It will set up infrastructure, run investigations, generate content, and teach you
+    as you go.
+  </p>
+  <p>
+    <a href="getting-started.html">Getting Started Guide</a> &middot;
+    <a href="https://github.com/bedwards/cleansing-fire">GitHub Repository</a> &middot;
+    <a href="philosophy.md">Full Philosophy</a>
   </p>
 </section>
 
@@ -304,29 +674,244 @@
   Ignis purgat. Luciditas liberat.<br>
   <small style="color: var(--ash);">Fire purifies. Lucidity liberates.</small>
 </div>
-
 </div>
+</main>
 
-<footer>
+<footer role="contentinfo">
   <p>Cleansing Fire is open source. There is no authorized interpreter of this framework.</p>
   <p>The framework is a set of tools; its validity is determined by its effects, not its fidelity to canonical sources.</p>
-  <p><a href="https://github.com/bedwards/cleansing-fire">Source</a></p>
+  <p>
+    <a href="https://github.com/bedwards/cleansing-fire">Source</a> &middot;
+    <a href="getting-started.html">Get Started</a> &middot;
+    Built with contaminated hands.
+  </p>
 </footer>
 
+<!-- Screen reader only text -->
+<style>.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }</style>
+
 <script>
-// Generate floating embers
+// ====== EMBER PARTICLES ======
 const field = document.getElementById('embers');
-for (let i = 0; i < 30; i++) {
-  const ember = document.createElement('div');
-  ember.className = 'ember';
-  ember.style.left = Math.random() * 100 + '%';
-  ember.style.animationDuration = (8 + Math.random() * 15) + 's';
-  ember.style.animationDelay = Math.random() * 10 + 's';
-  ember.style.width = (1 + Math.random() * 3) + 'px';
-  ember.style.height = ember.style.width;
-  ember.style.background = ['#ff4400','#ff8800','#ffcc00','#ff6600'][Math.floor(Math.random()*4)];
-  field.appendChild(ember);
+function createEmbers() {
+  for (let i = 0; i < 25; i++) {
+    const ember = document.createElement('div');
+    ember.className = 'ember-particle';
+    ember.style.left = Math.random() * 100 + '%';
+    ember.style.animationDuration = (8 + Math.random() * 15) + 's';
+    ember.style.animationDelay = Math.random() * 10 + 's';
+    const size = (1 + Math.random() * 3) + 'px';
+    ember.style.width = size;
+    ember.style.height = size;
+    ember.style.background = ['#ff4400','#ff8800','#ffcc00','#ff6600'][Math.floor(Math.random()*4)];
+    field.appendChild(ember);
+  }
 }
+createEmbers();
+
+// ====== TOOLBAR VISIBILITY ======
+const toolbar = document.getElementById('toolbar');
+let lastScroll = 0;
+window.addEventListener('scroll', () => {
+  toolbar.classList.toggle('visible', window.scrollY > 200);
+  lastScroll = window.scrollY;
+}, { passive: true });
+
+// ====== MOBILE NAV ======
+const navToggle = document.getElementById('nav-toggle');
+const navLinks = document.getElementById('nav-links');
+navToggle.addEventListener('click', () => {
+  const isOpen = navLinks.classList.toggle('open');
+  navToggle.setAttribute('aria-expanded', isOpen);
+  navToggle.textContent = isOpen ? 'Close' : 'Menu';
+});
+
+// ====== TEXT-TO-SPEECH ======
+const btnTTS = document.getElementById('btn-tts');
+let ttsActive = false;
+let ttsUtterance = null;
+
+btnTTS.addEventListener('click', () => {
+  if (!('speechSynthesis' in window)) {
+    alert('Text-to-speech is not supported in your browser. Try Chrome or Edge.');
+    return;
+  }
+  if (ttsActive) {
+    speechSynthesis.cancel();
+    ttsActive = false;
+    btnTTS.classList.remove('active');
+    btnTTS.innerHTML = '&#9654; Listen';
+    document.querySelectorAll('.tts-reading').forEach(el => el.classList.remove('tts-reading'));
+    return;
+  }
+
+  // Gather readable text from main content
+  const sections = document.querySelectorAll('main section');
+  const texts = [];
+  sections.forEach(s => {
+    const h = s.querySelector('h2');
+    if (h) texts.push(h.textContent);
+    s.querySelectorAll('p, .principle-text').forEach(p => texts.push(p.textContent));
+  });
+  const fullText = texts.join('. ');
+
+  ttsUtterance = new SpeechSynthesisUtterance(fullText);
+  ttsUtterance.rate = 0.9;
+  ttsUtterance.pitch = 0.95;
+
+  // Try to pick a good voice
+  const voices = speechSynthesis.getVoices();
+  const preferred = voices.find(v => v.name.includes('Samantha') || v.name.includes('Daniel') || v.name.includes('Google'));
+  if (preferred) ttsUtterance.voice = preferred;
+
+  ttsUtterance.onend = () => {
+    ttsActive = false;
+    btnTTS.classList.remove('active');
+    btnTTS.innerHTML = '&#9654; Listen';
+  };
+
+  speechSynthesis.speak(ttsUtterance);
+  ttsActive = true;
+  btnTTS.classList.add('active');
+  btnTTS.innerHTML = '&#9724; Stop';
+});
+
+// Load voices async
+if ('speechSynthesis' in window) {
+  speechSynthesis.onvoiceschanged = () => {};
+}
+
+// ====== HIGH CONTRAST ======
+const btnContrast = document.getElementById('btn-contrast');
+btnContrast.addEventListener('click', () => {
+  document.body.classList.toggle('high-contrast');
+  btnContrast.classList.toggle('active');
+});
+
+// ====== TOGGLE EMBERS ======
+const btnEmbers = document.getElementById('btn-embers');
+btnEmbers.addEventListener('click', () => {
+  const hidden = field.getAttribute('aria-hidden') === 'true';
+  if (hidden) {
+    field.setAttribute('aria-hidden', 'false');
+    field.style.display = '';
+  } else {
+    field.setAttribute('aria-hidden', 'true');
+  }
+  btnEmbers.classList.toggle('active');
+});
+
+// ====== FONT SIZE ======
+let fontSize = 105;
+document.getElementById('btn-font-up').addEventListener('click', () => {
+  fontSize = Math.min(150, fontSize + 10);
+  document.body.style.fontSize = fontSize + '%';
+});
+document.getElementById('btn-font-down').addEventListener('click', () => {
+  fontSize = Math.max(70, fontSize - 10);
+  document.body.style.fontSize = fontSize + '%';
+});
+
+// ====== GEMINI AI CHAT ======
+const GEMINI_CONTEXT = `You are the AI voice of the Cleansing Fire project, operating under Pyrrhic Lucidity.
+
+Core facts about the project:
+- Cleansing Fire builds decentralized technology to shift power from corrupt concentrated authority toward the people
+- It operates under Pyrrhic Lucidity: see clearly, act anyway, bear the cost
+- 7 Principles: Lucidity Before Liberation, Relational Agency, Transparent Mechanism, Adversarial Collaboration, Minimum Viable Coercion, Recursive Accountability, Differential Solidarity
+- The Ember Economy: decentralized economics with demurrage currency, commons protocol, production mesh
+- FireWire Protocol: federation for autonomous AI agents and humans
+- OSINT pipeline: corporate power mapping, civic data, intelligence gathering
+- The Forge: data becomes art, poetry, visualizations, satire
+- The human interface is Claude Code CLI
+
+Voice guidelines:
+- Never claim purity. We are compromised. Say so.
+- Be specific about mechanisms, not vague about evils
+- Include what the reader can DO
+- Acknowledge the cost of seeing clearly
+- Be honest about what you don't know
+- Keep responses concise (2-4 paragraphs max)
+- End with invitation, not despair`;
+
+const chatMessages = document.getElementById('chat-messages');
+const chatForm = document.getElementById('chat-form');
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
+
+function addMessage(text, type) {
+  const msg = document.createElement('div');
+  msg.className = 'chat-msg ' + type;
+  msg.textContent = text;
+  chatMessages.appendChild(msg);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return msg;
+}
+
+chatForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const question = chatInput.value.trim();
+  if (!question) return;
+
+  addMessage(question, 'user');
+  chatInput.value = '';
+  chatSend.disabled = true;
+
+  const thinkingMsg = addMessage('Burning through the data...', 'system');
+
+  try {
+    const response = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=REDACTED_API_KEY',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: GEMINI_CONTEXT }] },
+          contents: [{ parts: [{ text: question }] }],
+          generationConfig: {
+            temperature: 0.8,
+            maxOutputTokens: 1024,
+          }
+        })
+      }
+    );
+
+    thinkingMsg.remove();
+
+    if (!response.ok) {
+      const err = await response.text();
+      addMessage('The fire falters. API error — try again or check the console.', 'system');
+      console.error('Gemini API error:', err);
+    } else {
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'The fire is silent. No response generated.';
+      addMessage(text, 'ai');
+    }
+  } catch (err) {
+    thinkingMsg.remove();
+    addMessage('Network error. The fire burns locally — check your connection.', 'system');
+    console.error('Chat error:', err);
+  }
+
+  chatSend.disabled = false;
+  chatInput.focus();
+});
+
+// ====== INTERSECTION OBSERVER FOR ANIMATIONS ======
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.style.animation = 'fadeIn 0.6s ease-out forwards';
+      observer.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.1 });
+
+document.querySelectorAll('section').forEach(s => {
+  s.style.opacity = '0';
+  observer.observe(s);
+});
 </script>
+
 </body>
 </html>

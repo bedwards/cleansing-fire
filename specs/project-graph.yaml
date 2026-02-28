@@ -1,0 +1,432 @@
+# Cleansing Fire -- Project Component Graph
+#
+# This file defines every component in the project, its status, and how
+# components depend on each other. AI agents should read this to understand
+# the project architecture before making changes.
+#
+# Status values:
+#   concept    -- idea exists, no code
+#   research   -- actively researched, design in progress
+#   prototype  -- working code, not production-ready
+#   production -- stable, tested, relied upon
+#   deprecated -- being phased out
+
+metadata:
+  version: "0.1.0"
+  updated: "2026-02-28"
+  description: "Component dependency graph for Cleansing Fire"
+  human_docs:
+    - path: "CLAUDE.md"
+      description: "Project overview with architecture section"
+    - path: "docs/technology-research.md"
+      description: "Technology landscape research"
+    - path: "docs/decentralized-systems.md"
+      description: "Decentralized architecture research"
+
+# ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
+
+components:
+
+  # --- Core Infrastructure ---
+
+  gatekeeper-daemon:
+    name: "Gatekeeper Daemon"
+    path: "daemon/gatekeeper.py"
+    status: prototype
+    description: >
+      HTTP server on localhost:7800 that serializes GPU access to local Ollama.
+      Short queue (default 5), rejects on overflow for backpressure.
+      Single worker thread processes tasks serially.
+    provides:
+      - "HTTP API for LLM task submission"
+      - "GPU contention management"
+      - "Task queuing and status tracking"
+    endpoints:
+      - method: POST
+        path: /submit
+        description: "Async task submission, returns task ID"
+      - method: POST
+        path: /submit-sync
+        description: "Synchronous task submission, blocks until complete"
+      - method: GET
+        path: /task/{id}
+        description: "Poll task status and result"
+      - method: GET
+        path: /health
+        description: "Health check"
+    config:
+      port: 7800
+      default_queue_size: 5
+      default_model: "mistral-large:123b"
+      ollama_url: "http://localhost:11434"
+    depends_on:
+      - ollama  # external dependency
+
+  scheduler:
+    name: "Task Scheduler"
+    path: "scheduler/scheduler.py"
+    status: prototype
+    description: >
+      Cron-like scheduled tasks and event-driven tasks.
+      Executes via plugins, shell commands, gatekeeper, or orchestrator.
+      Tasks defined in scheduler/tasks.json.
+    provides:
+      - "Cron-style task scheduling"
+      - "Event-driven task triggering (file watcher, webhooks)"
+      - "Plugin execution coordination"
+      - "Gatekeeper integration for LLM tasks"
+    config_file: "scheduler/tasks.json"
+    depends_on:
+      - gatekeeper-daemon  # for LLM tasks
+      - plugin-system      # for plugin execution
+
+  worker-orchestrator:
+    name: "Worker Orchestrator"
+    path: "workers/orchestrator.sh"
+    status: prototype
+    description: >
+      Launches Claude Code workers in isolated git worktrees.
+      Manages the implementation -> review -> merge pipeline.
+      Creates GitHub issues, branches, and PRs.
+    provides:
+      - "Implementation worker launch"
+      - "Review worker launch"
+      - "Git worktree isolation"
+      - "GitHub issue/PR management"
+    commands:
+      - "workers/orchestrator.sh implement <title> <description>"
+      - "workers/orchestrator.sh review <pr-number>"
+      - "workers/orchestrator.sh status"
+    depends_on:
+      - claude-code    # external dependency
+      - github         # external dependency
+
+  cli-client:
+    name: "CLI Client (fire-ask)"
+    path: "bin/fire-ask"
+    status: prototype
+    description: >
+      Command-line interface to the gatekeeper daemon.
+      Submits prompts and retrieves results.
+    provides:
+      - "CLI access to local LLM via gatekeeper"
+    depends_on:
+      - gatekeeper-daemon
+
+  plugin-system:
+    name: "Plugin System"
+    path: "plugins/"
+    status: prototype
+    description: >
+      Executable scripts that accept JSON on stdin and produce JSON on stdout.
+      Self-contained, language-agnostic. Each plugin can call the gatekeeper
+      for LLM tasks. Plugins are the primary extensibility mechanism.
+    provides:
+      - "Modular, composable functionality"
+      - "Language-agnostic plugin interface"
+      - "Gatekeeper integration for LLM-powered plugins"
+    interface:
+      input: "JSON on stdin"
+      output: "JSON on stdout"
+      exit_codes:
+        0: "success"
+        non_zero: "failure"
+      env_vars:
+        CF_PROJECT_DIR: "Path to project root"
+    naming_convention: "<category>-<name>"
+    depends_on:
+      - gatekeeper-daemon  # optional, for LLM-powered plugins
+
+  # --- Plugins (Civic Data) ---
+
+  plugin-civic-legiscan:
+    name: "Legislative Monitor (LegiScan)"
+    path: "plugins/civic-legiscan"
+    status: prototype
+    category: civic
+    description: >
+      Monitors legislation across all 50 states + Congress via LegiScan API.
+      Searches, retrieves, and summarizes bills using gatekeeper LLM.
+    actions:
+      - name: search
+        input: '{"action": "search", "query": "...", "state": "US"}'
+      - name: bill
+        input: '{"action": "bill", "bill_id": 12345}'
+      - name: monitor
+        input: '{"action": "monitor", "keywords": ["surveillance", "encryption"]}'
+    requires_env:
+      - LEGISCAN_API_KEY
+    depends_on:
+      - gatekeeper-daemon
+      - plugin-system
+
+  plugin-civic-fec:
+    name: "Campaign Finance Monitor (FEC)"
+    path: "plugins/civic-fec"
+    status: prototype
+    category: civic
+    description: >
+      Queries Federal Election Commission API for campaign donations,
+      expenditures, and financial connections.
+    actions:
+      - name: candidate
+        input: '{"action": "candidate", "name": "Smith"}'
+      - name: donor
+        input: '{"action": "donor", "name": "Koch Industries"}'
+      - name: contributions
+        input: '{"action": "contributions", "committee_id": "C00012345", "min_amount": 1000}'
+      - name: crossref
+        input: '{"action": "crossref", "candidate": "Smith", "donor": "Company X"}'
+    requires_env:
+      - FEC_API_KEY
+    depends_on:
+      - gatekeeper-daemon
+      - plugin-system
+
+  plugin-civic-spending:
+    name: "Government Spending Monitor (USAspending)"
+    path: "plugins/civic-spending"
+    status: prototype
+    category: civic
+    description: >
+      Queries USAspending.gov API for federal contracts, grants, and spending.
+      No API key required -- fully open government data.
+    actions:
+      - name: search
+        input: '{"action": "search", "keyword": "surveillance technology"}'
+      - name: recipient
+        input: '{"action": "recipient", "name": "Palantir"}'
+      - name: agency
+        input: '{"action": "agency", "code": "097", "fiscal_year": 2025}'
+    requires_env: []  # No API key needed
+    depends_on:
+      - gatekeeper-daemon
+      - plugin-system
+
+  plugin-civic-crossref:
+    name: "Corruption Cross-Referencer"
+    path: "plugins/civic-crossref"
+    status: prototype
+    category: civic
+    description: >
+      Integration layer that cross-references campaign donations (FEC),
+      government contracts (USAspending), legislative votes, and lobbying data.
+      Flags correlations between money, votes, and contracts.
+    actions:
+      - name: investigate
+        input: '{"action": "investigate", "entity": "Palantir"}'
+      - name: follow_money
+        input: '{"action": "follow_money", "candidate": "Ted Cruz"}'
+      - name: contract_donors
+        input: '{"action": "contract_donors", "keyword": "border surveillance"}'
+    depends_on:
+      - plugin-civic-fec
+      - plugin-civic-spending
+      - plugin-civic-legiscan
+      - gatekeeper-daemon
+      - plugin-system
+
+  # --- Plugins (The Forge) ---
+
+  plugin-forge-vision:
+    name: "The Forge: Vision Generator"
+    path: "plugins/forge-vision"
+    status: prototype
+    category: forge
+    description: >
+      Transforms data into visual art: SVG visualizations, ASCII art,
+      Mermaid diagrams, and image generation prompts. Raw data goes in,
+      visual weapons come out.
+    actions:
+      - name: money_flow
+        input: '{"action": "money_flow", "data": {...}}'
+        output: "SVG Sankey diagram"
+      - name: power_network
+        input: '{"action": "power_network", "data": {...}}'
+        output: "Network graph SVG"
+      - name: timeline
+        input: '{"action": "timeline", "events": [...]}'
+        output: "SVG timeline"
+      - name: ascii_fire
+        input: '{"action": "ascii_fire", "text": "..."}'
+        output: "ASCII art"
+      - name: corruption_meter
+        input: '{"action": "corruption_meter", "score": 7.5}'
+        output: "Visual corruption gauge SVG"
+      - name: prompt
+        input: '{"action": "prompt", "concept": "..."}'
+        output: "Image generation prompt for SD/FLUX"
+      - name: mermaid
+        input: '{"action": "mermaid", "description": "..."}'
+        output: "Mermaid.js diagram code"
+    depends_on:
+      - gatekeeper-daemon
+      - plugin-system
+
+  plugin-forge-voice:
+    name: "The Forge: Voice Generator"
+    path: "plugins/forge-voice"
+    status: prototype
+    category: forge
+    description: >
+      Transforms data and analysis into human-readable content:
+      social media posts, newsletter digests, spoken word scripts,
+      poetic reframings, agitprop. Every dataset is a story.
+    actions:
+      - name: social
+        input: '{"action": "social", "data": {...}, "platform": "mastodon", "tone": "urgent"}'
+      - name: digest
+        input: '{"action": "digest", "items": [...], "period": "weekly"}'
+      - name: poeticize
+        input: '{"action": "poeticize", "raw_data": "...", "form": "haiku|sonnet|prose|free"}'
+      - name: agitprop
+        input: '{"action": "agitprop", "issue": "...", "audience": "general|youth|workers|elders"}'
+      - name: thread
+        input: '{"action": "thread", "topic": "...", "sources": [...], "max_posts": 10}'
+    depends_on:
+      - gatekeeper-daemon
+      - plugin-system
+
+  # --- Plugins (Pipeline) ---
+
+  plugin-pipeline-data-to-fire:
+    name: "Data-to-Fire Pipeline"
+    path: "plugins/pipeline-data-to-fire"
+    status: prototype
+    category: pipeline
+    description: >
+      Full pipeline: raw civic data -> analysis -> visualization -> narrative -> distribution.
+      Orchestrates other plugins to produce complete multimedia investigation packages.
+    actions:
+      - name: full_investigation
+        input: '{"action": "full_investigation", "target": "Palantir"}'
+        output: "Complete content package with all assets"
+      - name: bill_spotlight
+        input: '{"action": "bill_spotlight", "bill_id": 12345}'
+        output: "Bill analysis package"
+      - name: weekly_fire
+        input: '{"action": "weekly_fire", "topics": ["surveillance", "antitrust"]}'
+        output: "Weekly digest package"
+    depends_on:
+      - plugin-civic-crossref
+      - plugin-forge-vision
+      - plugin-forge-voice
+      - plugin-system
+
+  # --- Documentation ---
+
+  docs-site:
+    name: "Documentation Site"
+    path: "docs/"
+    status: prototype
+    description: >
+      GitHub Pages site with research documents, guides, and project information.
+      Human-oriented documentation complementing the machine-readable specs.
+    depends_on: []  # standalone
+
+  specs:
+    name: "Machine-Readable Specifications"
+    path: "specs/"
+    status: prototype
+    description: >
+      Structured YAML/JSON specs for AI agents. Project graph, plugin schemas,
+      agent capabilities, goal hierarchies.
+    depends_on: []  # standalone
+
+  philosophy:
+    name: "Pyrrhic Lucidity Framework"
+    path: "philosophy.md"
+    status: production
+    description: >
+      The philosophical foundation: Pyrrhic Lucidity. A philosophy of contested
+      liberation for the age of systemic capture. Defines the project's values,
+      ethical framework, and intellectual grounding.
+    depends_on: []  # foundational, everything depends on this conceptually
+
+  # --- External Dependencies ---
+
+  ollama:
+    name: "Ollama (Local LLM Runtime)"
+    status: external
+    description: "Local LLM inference server. Runs models on GPU."
+    url: "http://localhost:11434"
+    note: "Must be installed and running separately"
+
+  claude-code:
+    name: "Claude Code (AI Agent)"
+    status: external
+    description: "Anthropic's CLI agent. Used as orchestrator and for background workers."
+    note: "Requires Anthropic API access"
+
+  github:
+    name: "GitHub"
+    status: external
+    description: "Repository hosting, issue tracking, PR workflow."
+    note: "gh CLI must be authenticated"
+
+  # --- Future Components ---
+
+  federation-protocol:
+    name: "Federation Protocol"
+    path: null  # not yet created
+    status: concept
+    description: >
+      Protocol for Cleansing Fire nodes to discover each other, share data,
+      coordinate investigations, and distribute content. Designed for
+      censorship resistance and decentralization.
+    depends_on:
+      - gatekeeper-daemon
+      - plugin-system
+
+  mcp-server:
+    name: "MCP Server"
+    path: null
+    status: concept
+    description: >
+      Model Context Protocol server exposing Cleansing Fire capabilities
+      as MCP tools. Would allow any MCP-compatible AI agent to use
+      Cleansing Fire plugins, submit gatekeeper tasks, and access
+      civic data.
+    depends_on:
+      - gatekeeper-daemon
+      - plugin-system
+
+  a2a-agent:
+    name: "A2A Agent Interface"
+    path: null
+    status: concept
+    description: >
+      Agent2Agent protocol interface allowing Cleansing Fire agents
+      to communicate with agents from other projects and organizations.
+      Enables collaborative investigations across organizational boundaries.
+    depends_on:
+      - federation-protocol
+      - mcp-server
+
+# ---------------------------------------------------------------------------
+# Dependency Summary (adjacency list)
+# ---------------------------------------------------------------------------
+# This is a flattened view for quick parsing.
+# Format: component -> [dependencies]
+
+dependency_graph:
+  gatekeeper-daemon: [ollama]
+  scheduler: [gatekeeper-daemon, plugin-system]
+  worker-orchestrator: [claude-code, github]
+  cli-client: [gatekeeper-daemon]
+  plugin-system: [gatekeeper-daemon]
+  plugin-civic-legiscan: [gatekeeper-daemon, plugin-system]
+  plugin-civic-fec: [gatekeeper-daemon, plugin-system]
+  plugin-civic-spending: [gatekeeper-daemon, plugin-system]
+  plugin-civic-crossref: [plugin-civic-fec, plugin-civic-spending, plugin-civic-legiscan, gatekeeper-daemon, plugin-system]
+  plugin-forge-vision: [gatekeeper-daemon, plugin-system]
+  plugin-forge-voice: [gatekeeper-daemon, plugin-system]
+  plugin-pipeline-data-to-fire: [plugin-civic-crossref, plugin-forge-vision, plugin-forge-voice, plugin-system]
+  docs-site: []
+  specs: []
+  philosophy: []
+  federation-protocol: [gatekeeper-daemon, plugin-system]
+  mcp-server: [gatekeeper-daemon, plugin-system]
+  a2a-agent: [federation-protocol, mcp-server]

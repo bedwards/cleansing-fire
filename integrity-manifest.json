@@ -1,0 +1,63 @@
+{
+  "manifest_version": "1.0.0",
+  "project": "cleansing-fire",
+  "description": "Integrity manifest for fork protection. This file lists protected files, their SHA-256 hashes, required principles, and key philosophical phrases. Changes to this file require multi-party review and explicit justification.",
+  "last_updated": "2026-02-28",
+  "protected_files": {
+    "CLAUDE.md": {
+      "sha256": "7426f4521f2737a2e23a87784913ee15d7a13dbcbe7532f953f490cf1b45bbfa",
+      "description": "Project constitution. Contains the 7 Principles, mission, architecture, and conventions.",
+      "protection_level": "critical"
+    },
+    "philosophy.md": {
+      "sha256": "236a53620152fa8ece1a59714c7d98b3b480fef7675f23d0e4cfbf6758dfb3b2",
+      "description": "Pyrrhic Lucidity framework. The philosophical foundation of the entire project.",
+      "protection_level": "critical"
+    },
+    "docs/decentralized-systems.md": {
+      "sha256": "3191fb964d0d473bdb36734141a2b8e2b0c9fe8353bd91a510917dd7ba623a23",
+      "description": "Decentralized systems research. Patterns from nature, history, and technology.",
+      "protection_level": "standard"
+    },
+    "docs/economics.md": {
+      "sha256": "56163d1e2d649915a44fcf6da9cfdc24be30644d983dafdf781dcfbf11e95645",
+      "description": "The Ember Economy. Decentralized economic model.",
+      "protection_level": "standard"
+    },
+    "docs/historical-research.md": {
+      "sha256": "356a317f9ecd12f3c344454ea6fe7ffac9dff32202abda7e7802dc3daf5bb69c",
+      "description": "Historical research on power rebalancing.",
+      "protection_level": "standard"
+    },
+    "docs/technology-research.md": {
+      "sha256": "8ed5a63047d50f72151192c57ade3dbb0b9b56c0be707f87011f3098da3191e1",
+      "description": "Technology landscape research.",
+      "protection_level": "standard"
+    },
+    "docs/literary-arsenal.md": {
+      "sha256": "01bbd4b47db1a485922ac5ae37f548da7c0c88dba3dd0a18a55a53ff59f7a248",
+      "description": "Literary arsenal. Mottos, poems, slogans, manifestos.",
+      "protection_level": "standard"
+    }
+  },
+  "required_principles": [
+    "Lucidity Before Liberation",
+    "Relational Agency",
+    "Transparent Mechanism",
+    "Adversarial Collaboration",
+    "Minimum Viable Coercion",
+    "Recursive Accountability",
+    "Differential Solidarity"
+  ],
+  "required_phrases": [
+    "the critic is compromised, the tools are contaminated, the audience is captured, and action is still required",
+    "Corruption is not binary but gradient",
+    "information asymmetry is not merely an instrument of power; it is the substrate of power itself",
+    "Any group, institution, or movement that cannot tolerate structured internal dissent is already captured",
+    "Those who exercise power in the name of liberation must be subject to accountability structures at least as rigorous as those they seek to impose on existing power",
+    "if it costs nothing to the actor, it is structurally suspect",
+    "The self is a process of partial differentiation within a field of forces"
+  ],
+  "required_phrases_file": "philosophy.md",
+  "notes": "To update this manifest after legitimate changes to protected files: (1) make changes in a feature branch, (2) recompute hashes with shasum -a 256, (3) update this file, (4) submit PR with both changes, (5) require multi-party review."
+}

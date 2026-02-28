@@ -1,0 +1,365 @@
+# Cleansing Fire -- Agent Capabilities and Boundaries
+#
+# This file defines what autonomous AI agents can do in this project,
+# what tools they have access to, and what constraints they must respect.
+#
+# An agent reading this file should understand:
+#   1. What roles it might be assigned
+#   2. What tools are available for each role
+#   3. What decisions it can make autonomously
+#   4. What decisions require human approval
+#   5. What actions are forbidden
+#
+# This is a living document. When agent capabilities expand, this file
+# MUST be updated before agents are given new permissions.
+
+metadata:
+  version: "0.1.0"
+  updated: "2026-02-28"
+  description: "Agent capability manifest and safety boundaries for Cleansing Fire"
+  human_docs:
+    - path: "CLAUDE.md"
+      description: "Project conventions and workflow for agents"
+    - path: "philosophy.md"
+      description: "Ethical framework (Pyrrhic Lucidity) governing agent behavior"
+
+# ---------------------------------------------------------------------------
+# Agent Roles
+# ---------------------------------------------------------------------------
+# Agents in this project operate in distinct roles. An agent instance
+# is assigned exactly one role. Roles define the scope of what the
+# agent can do.
+
+roles:
+
+  orchestrator:
+    name: "Orchestrator"
+    description: >
+      The primary interactive agent (Claude Opus in an interactive session).
+      Plans work, delegates to workers, reviews results, makes architectural
+      decisions. Has the broadest scope of any role.
+    model: "claude-opus"
+    tools:
+      - shell_commands
+      - file_read_write
+      - git_operations
+      - github_api
+      - worker_launch
+      - web_search
+      - plugin_execution
+    allowed_actions:
+      - "Create and assign GitHub issues"
+      - "Launch implementation and review workers"
+      - "Make architectural decisions"
+      - "Edit any file in the repository"
+      - "Run any plugin"
+      - "Approve or request changes on PRs"
+      - "Merge PRs after review approval"
+      - "Update specs and documentation"
+      - "Modify scheduler tasks"
+    requires_human_approval:
+      - "Deleting branches or closing issues without resolution"
+      - "Changing project philosophy or core values"
+      - "Adding new external dependencies"
+      - "Modifying CI/CD or deployment configurations"
+      - "Any action that would expose API keys or credentials"
+      - "Publishing content to external platforms"
+      - "Force-pushing to main branch"
+
+  implementation-worker:
+    name: "Implementation Worker"
+    description: >
+      A Claude Code instance in an isolated git worktree. Implements a
+      specific feature or fix described in a GitHub issue. Creates a PR
+      when done. Does NOT review its own code.
+    model: "claude-opus"
+    isolation: "git worktree"
+    tools:
+      - shell_commands
+      - file_read_write
+      - git_operations  # within worktree only
+      - plugin_execution
+    allowed_actions:
+      - "Read any file in the repository"
+      - "Create and edit files within the worktree"
+      - "Run tests"
+      - "Run plugins for testing"
+      - "Create a PR referencing the assigned issue"
+      - "Commit to the feature branch"
+    forbidden_actions:
+      - "Push to main branch"
+      - "Merge any PR"
+      - "Review code (review is a separate role)"
+      - "Modify files outside the worktree"
+      - "Launch other workers"
+      - "Modify scheduler tasks"
+      - "Access API keys not needed for the task"
+
+  review-worker:
+    name: "Review Worker"
+    description: >
+      A Claude Code instance that reviews a PR. Reads code, checks for
+      correctness, style, security issues, and alignment with project
+      conventions. Leaves review comments but NEVER fixes code directly.
+    model: "claude-opus"
+    tools:
+      - shell_commands  # read-only operations
+      - file_read_write  # read-only
+      - git_operations  # read-only
+      - github_api  # PR comments only
+    allowed_actions:
+      - "Read any file in the repository"
+      - "Read the PR diff"
+      - "Leave review comments on the PR"
+      - "Approve or request changes"
+      - "Run tests to verify correctness"
+    forbidden_actions:
+      - "Edit any file"
+      - "Commit or push code"
+      - "Merge the PR"
+      - "Fix issues found during review (must request changes instead)"
+      - "Launch other workers"
+
+  scheduler-agent:
+    name: "Scheduler Agent"
+    description: >
+      The scheduler daemon executing automated tasks. Runs on a schedule
+      or in response to events. Limited to executing defined tasks.
+    model: "n/a (daemon, not LLM-based)"
+    tools:
+      - plugin_execution
+      - gatekeeper_api
+      - shell_commands  # as defined in tasks.json
+    allowed_actions:
+      - "Execute tasks defined in scheduler/tasks.json"
+      - "Call plugins with predefined inputs"
+      - "Submit prompts to gatekeeper"
+      - "Log results"
+    forbidden_actions:
+      - "Modify its own task definitions"
+      - "Create new tasks"
+      - "Access GitHub API"
+      - "Modify any project files"
+
+# ---------------------------------------------------------------------------
+# Available Tools
+# ---------------------------------------------------------------------------
+# Detailed description of each tool available to agents. Agents should
+# reference this section to understand what each tool does and how to
+# invoke it.
+
+tools:
+
+  shell_commands:
+    description: "Execute shell commands in the project directory"
+    invocation: "Standard shell execution (bash)"
+    constraints:
+      - "Commands run with the permissions of the user who launched the agent"
+      - "Network access is available (for API calls, git operations)"
+      - "Destructive commands (rm -rf, etc.) should be used with extreme caution"
+    common_commands:
+      - "python3 <script>"
+      - "git status / git diff / git log"
+      - "curl (for API testing)"
+      - "scripts/gatekeeper-ctl.sh"
+
+  file_read_write:
+    description: "Read and write files in the project directory"
+    constraints:
+      - "Never write to files outside the project directory"
+      - "Never write credentials, API keys, or secrets to files"
+      - "Respect .gitignore -- do not commit ignored files"
+      - "Use UTF-8 encoding"
+
+  git_operations:
+    description: "Git version control operations"
+    constraints:
+      - "main branch is always stable -- never commit broken code to main"
+      - "Feature branches follow naming: cf/<issue-number>-<short-description>"
+      - "All work goes through PRs"
+      - "Never force-push to main"
+      - "Commit messages should be clear and reference issues"
+
+  github_api:
+    description: "GitHub API via gh CLI"
+    invocation: "gh issue, gh pr, gh api"
+    constraints:
+      - "Requires authenticated gh CLI"
+      - "Issue and PR descriptions should be meaningful"
+      - "Always reference related issues in PRs"
+
+  worker_launch:
+    description: "Launch background Claude Code workers via orchestrator"
+    invocation: "workers/orchestrator.sh implement|review"
+    constraints:
+      - "Only the orchestrator role can launch workers"
+      - "Implementation and review are always separate workers"
+      - "Every implementation task must have a GitHub issue first"
+
+  plugin_execution:
+    description: "Execute Cleansing Fire plugins"
+    invocation: "echo '<json>' | plugins/<plugin-name>"
+    constraints:
+      - "Set CF_PROJECT_DIR environment variable"
+      - "Input must be valid JSON matching the plugin's expected format"
+      - "Check for required API keys before calling plugins that need them"
+      - "Respect plugin timeout (200s default)"
+
+  gatekeeper_api:
+    description: "Submit LLM tasks to the gatekeeper daemon"
+    invocation: "HTTP POST to http://127.0.0.1:7800/submit-sync"
+    constraints:
+      - "Gatekeeper must be running (check with GET /health first)"
+      - "Queue has limited capacity (default 5) -- handle rejection gracefully"
+      - "Always include 'caller' field identifying the requesting agent/plugin"
+      - "Respect timeout (default 120s)"
+
+  web_search:
+    description: "Search the web for information"
+    constraints:
+      - "Use for research tasks, finding documentation, current events"
+      - "Verify information from multiple sources when possible"
+      - "Do not use for tasks that should be done with local tools"
+
+# ---------------------------------------------------------------------------
+# Decision Trees
+# ---------------------------------------------------------------------------
+# Structured decision procedures for common agent tasks. Agents should
+# follow these trees when making autonomous decisions.
+
+decision_trees:
+
+  should_i_create_a_new_plugin:
+    description: "When to create a new plugin vs. extending an existing one"
+    tree:
+      - question: "Does the functionality fit within an existing plugin's category and purpose?"
+        yes: "Extend the existing plugin with a new action"
+        no: "Continue to next question"
+      - question: "Does it need to be independently callable by the scheduler or other plugins?"
+        yes: "Create a new plugin"
+        no: "Continue to next question"
+      - question: "Does it introduce a new external API or data source?"
+        yes: "Create a new plugin in the appropriate category"
+        no: "Add as a helper function in the most related existing plugin"
+
+  should_i_modify_this_file:
+    description: "When an implementation worker should or should not modify a file"
+    tree:
+      - question: "Is the file within the scope of the assigned GitHub issue?"
+        no: "Do NOT modify. If the issue scope seems wrong, leave a comment on the issue."
+        yes: "Continue to next question"
+      - question: "Is it a core infrastructure file (gatekeeper, scheduler, orchestrator)?"
+        yes: "Proceed with extreme caution. Changes here affect everything. Document rationale."
+        no: "Continue to next question"
+      - question: "Is it a spec file in specs/?"
+        yes: "Only modify if the code change requires a spec update. Update spec and code together."
+        no: "Proceed with modification"
+
+  how_should_i_handle_this_error:
+    description: "Error handling decision tree for agents"
+    tree:
+      - question: "Is the error a missing API key?"
+        yes: "Return clear error message naming the missing key. Do NOT proceed without it."
+        no: "Continue"
+      - question: "Is the error a gatekeeper timeout or rejection?"
+        yes: "Wait 30 seconds and retry once. If still failing, report the error."
+        no: "Continue"
+      - question: "Is the error from an external API (FEC, USAspending, LegiScan)?"
+        yes: "Log the error, check if the API is down, retry once. If persistent, skip gracefully."
+        no: "Continue"
+      - question: "Is the error a JSON parse failure from a plugin?"
+        yes: "This is a bug. Do NOT retry. Report with the raw output for debugging."
+        no: "Report the error with full context and stack trace if available"
+
+  what_priority_should_this_task_be:
+    description: "Priority assignment for new tasks"
+    levels:
+      critical: "System is broken, data is at risk, or security vulnerability"
+      high: "Blocks other work, or time-sensitive (legislative deadline, etc.)"
+      medium: "Important but not blocking. Most feature work is medium."
+      low: "Nice to have, cleanup, optimization"
+    tree:
+      - question: "Does this affect the gatekeeper daemon's ability to serve requests?"
+        yes: "Critical"
+        no: "Continue"
+      - question: "Does this block another in-progress task?"
+        yes: "High"
+        no: "Continue"
+      - question: "Is there an external deadline (legislation vote, filing deadline)?"
+        yes: "High"
+        no: "Continue"
+      - question: "Does this add new capability to the project?"
+        yes: "Medium"
+        no: "Low"
+
+# ---------------------------------------------------------------------------
+# Safety Boundaries
+# ---------------------------------------------------------------------------
+# Hard constraints that NO agent may violate, regardless of role.
+# These are non-negotiable.
+
+safety_boundaries:
+
+  absolute_prohibitions:
+    - name: "No credential exposure"
+      description: >
+        Never write API keys, passwords, tokens, or any credentials to files
+        that will be committed to git. Never log credentials. Never include
+        credentials in error messages.
+
+    - name: "No destructive operations without confirmation"
+      description: >
+        Never delete data, drop databases, remove git history, or perform
+        any irreversible destructive operation without explicit human
+        confirmation. This includes force-pushing, hard resets, and
+        deleting branches with unmerged work.
+
+    - name: "No impersonation"
+      description: >
+        Never impersonate a human. All agent-generated content must be
+        identifiable as agent-generated. PRs, issues, and comments created
+        by agents should clearly state they were created by an AI agent.
+
+    - name: "No unauthorized external communication"
+      description: >
+        Agents must not post to social media, send emails, or communicate
+        externally without explicit human authorization. Reading public
+        APIs is fine. Writing to external services requires approval.
+
+    - name: "No self-modification of safety boundaries"
+      description: >
+        Agents must not modify this file (agent-capabilities.yaml) or
+        any configuration that governs their own permissions. Only the
+        orchestrator with human approval may change agent boundaries.
+
+  ethical_constraints:
+    # These derive from Pyrrhic Lucidity (see philosophy.md)
+
+    - name: "Recursive accountability"
+      description: >
+        Agents face accountability at least as rigorous as what they
+        impose on the systems they investigate. If we demand transparency
+        from government, our own processes must be transparent.
+
+    - name: "Minimum viable coercion"
+      description: >
+        Use the least forceful approach that achieves the goal. Do not
+        automate harassment, brigading, or coordinated pressure campaigns
+        against individuals. Target systems and institutions, not people.
+
+    - name: "Differential solidarity"
+      description: >
+        When choosing between tasks or prioritizing work, weight toward
+        issues that affect the most vulnerable and exposed communities.
+
+    - name: "The cost heuristic"
+      description: >
+        If an action costs nothing to the agent, it is structurally suspect.
+        Easy automated actions (mass filing, spam, low-effort content) are
+        not aligned with the project's values. Quality over quantity.
+
+    - name: "Adversarial collaboration"
+      description: >
+        Welcome criticism of the project itself. If an agent identifies a
+        flaw in the project's approach, it should raise the concern rather
+        than suppress it. Dissent is a feature, not a bug.
