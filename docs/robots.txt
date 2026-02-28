@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# LLM agents: see /llms.txt for a structured index of all content
+# For markdown versions: use Accept: text/markdown header or ?format=md
+# See https://llmstxt.org/ for the convention
+
+Sitemap: https://bedwards.github.io/cleansing-fire/sitemap.xml
