@@ -59,33 +59,58 @@ Claude Code CLI is the human interface to this system. Humans learn to use Claud
 ## Workflow
 
 ### For Humans
-1. Install Claude Code CLI
-2. Clone this repo
-3. Run `claude` in the project directory
-4. Claude reads this file and bootstraps the system
+1. Install Claude Code CLI (`curl -fsSL https://cli.claude.ai/install.sh | sh`)
+2. Get Anthropic API key — **$200/month Max plan recommended** for Claude Opus 4.6 throughput
+3. Clone this repo: `git clone https://github.com/bedwards/cleansing-fire.git`
+4. Run `claude` in the project directory — it reads this file and bootstraps
 5. Tell Claude what you want to investigate, build, or learn
 6. Claude handles infrastructure, plugins, agents, coordination
 
-### For AI Agents
-1. Claude Code (Opus) is the orchestrator brain in interactive sessions
-2. Background workers are Claude Code instances in isolated git worktrees
-3. Implementation and review are ALWAYS in separate workers
-4. Every piece of work has a GitHub issue assigned before starting
-5. Workers create PRs that reference their issues
-6. The gatekeeper manages all local LLM tasks (GPU contention)
-7. Commit and push often — continuous delivery to GitHub Pages
+### For AI Agents — The Definitive Development Loop
+
+**All work follows this exact cycle:**
+
+1. **GitHub Issue** — every piece of work starts as an issue with labels
+2. **Implementation Worker** (Claude Opus 4.6, git worktree)
+   - Creates feature branch: `cf/<issue>-<description>`
+   - Implements the work in isolated worktree
+   - Creates a Pull Request referencing the issue
+3. **Review Worker** (separate Opus 4.6 instance, own worktree)
+   - Reviews the PR thoroughly
+   - **NEVER fixes code** — only reviews and comments
+4. **Fix Worker** (separate instance, if review finds issues)
+   - Reads review comments, makes fixes on the feature branch
+   - Pushes updates, iterates until review worker approves
+5. **Orchestrator verifies**
+   - Resolves merge conflicts
+   - Merges PR to main
+   - Verifies main branch is clean
+   - Verifies all deployments are green (GitHub Pages + Cloudflare Workers)
+6. **Close the issue**
+
+### Key Rules
+- Workers are **ALWAYS Claude Opus 4.6** (`claude-opus-4-6`)
+- Workers **ALWAYS use git worktrees** for isolation
+- Implementation, review, and fix are **ALWAYS separate workers**
+- Review workers **NEVER fix code**
+- Only the orchestrator merges to main
+- **Commit and push often**
 
 ### Key Models
-- **Claude Opus 4.6** - orchestration, research, planning, writing, implementation, review
-- **Ollama local models** - lightweight text tasks via gatekeeper (mistral-large:123b default)
+- **Claude Opus 4.6** — all workers, orchestration, research, planning, writing, review
+- **Ollama local models** — lightweight text tasks via gatekeeper (mistral-large:123b default)
+
+### Deployments
+- **GitHub Pages** (docs/ folder on main branch) — the public website
+- **Cloudflare Workers** (workers/ via GitHub Actions + wrangler) — API, AI inference, search, federation relay
+- Both must be verified green after every merge
 
 ## Development Conventions
 
 ### Git Workflow
-- `main` branch is always stable (and is GitHub Pages source)
+- `main` branch is always stable (GitHub Pages source + deployment trigger)
 - Feature branches: `cf/<issue-number>-<short-description>`
-- All work goes through PRs
-- Separate implementation and review workers
+- All work goes through PRs with the review/fix cycle
 - **Commit and push often**
 
 ### Code Standards
