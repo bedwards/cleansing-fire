@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: FireWire Relay
+
+Plugin wrapper for the FireWire federation daemon. Provides a JSON stdin/stdout
+interface to the FireWire HTTP API, following the Cleansing Fire plugin protocol.
+
+Input JSON:
+  {"action": "announce", "peer_address": "http://host:7801"}
+  {"action": "broadcast", "title": "...", "content": "...", "domain": [...]}
+  {"action": "share-intelligence", "title": "...", "content": "...", "confidence": 0.7}
+  {"action": "get-peers"}
+  {"action": "get-intelligence", "limit": 20}
+
+Output JSON: varies by action
+
+Manifest:
+  name: firewire-relay
+  category: federation
+  description: Interface to the FireWire federation daemon for inter-node communication
+  actions:
+    - name: announce
+      description: Announce this node to a specific peer
+    - name: broadcast
+      description: Broadcast an intelligence message to all connected peers
+    - name: share-intelligence
+      description: Share investigation results with the federation network
+    - name: get-peers
+      description: List connected peers in the federation
+    - name: get-intelligence
+      description: Get latest intelligence from the network
+  requires_env: []
+  uses_gatekeeper: false
+  calls_plugins: []
+"""
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+FIREWIRE_URL = os.environ.get("FIREWIRE_URL", "http://127.0.0.1:7801")
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+
+def http_get(endpoint, timeout=15):
+    """GET request to the FireWire daemon."""
+    url = f"{FIREWIRE_URL}{endpoint}"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8")), None
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        try:
+            return json.loads(body), None
+        except json.JSONDecodeError:
+            return None, f"HTTP {e.code}: {body[:200]}"
+    except urllib.error.URLError as e:
+        return None, f"Connection failed: {e.reason}. Is the FireWire daemon running?"
+    except Exception as e:
+        return None, str(e)
+
+
+def http_post(endpoint, data, timeout=15):
+    """POST request to the FireWire daemon."""
+    url = f"{FIREWIRE_URL}{endpoint}"
+    payload = json.dumps(data).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8")), None
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        try:
+            return json.loads(body), None
+        except json.JSONDecodeError:
+            return None, f"HTTP {e.code}: {body[:200]}"
+    except urllib.error.URLError as e:
+        return None, f"Connection failed: {e.reason}. Is the FireWire daemon running?"
+    except Exception as e:
+        return None, str(e)
+
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+
+def action_announce(input_data):
+    """Announce this node to a specific peer."""
+    peer_address = input_data.get("peer_address", "").strip()
+    if not peer_address:
+        return {"error": "Missing required field: 'peer_address'", "error_code": "MISSING_FIELD"}
+
+    # Get our node info first
+    health, err = http_get("/health")
+    if err:
+        return {"error": f"Cannot reach local FireWire daemon: {err}", "error_code": "DAEMON_ERROR"}
+
+    node_id = health.get("node_id", "")
+
+    # Send announce to the remote peer
+    announce_data = {
+        "node_id": node_id,
+        "address": FIREWIRE_URL,
+        "capabilities": [],
+    }
+    result, err = http_post_remote(peer_address, "/peers/announce", announce_data)
+    if err:
+        return {"error": f"Could not announce to peer: {err}", "peer_address": peer_address}
+
+    # Also register the peer locally
+    peer_id = result.get("node_id", "remote")
+    local_result, _ = http_post("/peers/announce", {
+        "node_id": peer_id,
+        "address": peer_address,
+    })
+
+    return {
+        "status": "announced",
+        "peer_address": peer_address,
+        "peer_node_id": peer_id,
+        "local_node_id": node_id,
+        "remote_response": result,
+    }
+
+
+def http_post_remote(base_url, endpoint, data, timeout=15):
+    """POST to a remote peer (not the local daemon)."""
+    url = f"{base_url.rstrip('/')}{endpoint}"
+    payload = json.dumps(data).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8")), None
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}"
+    except urllib.error.URLError as e:
+        return None, f"Connection failed: {e.reason}"
+    except Exception as e:
+        return None, str(e)
+
+
+def action_broadcast(input_data):
+    """Broadcast an intelligence message to all connected peers."""
+    title = input_data.get("title", "").strip()
+    content = input_data.get("content", "").strip()
+    if not title or not content:
+        return {"error": "Missing required fields: 'title' and 'content'", "error_code": "MISSING_FIELD"}
+
+    intel_data = {
+        "title": title,
+        "content": content,
+        "domain": input_data.get("domain", []),
+        "classification": input_data.get("classification", "analysis"),
+        "confidence": input_data.get("confidence", 0.5),
+        "evidence": input_data.get("evidence", []),
+    }
+
+    result, err = http_post("/intelligence", intel_data)
+    if err:
+        return {"error": f"Broadcast failed: {err}", "error_code": "DAEMON_ERROR"}
+
+    return {
+        "status": "broadcast",
+        "title": title,
+        "intelligence_id": result.get("id", ""),
+        "broadcast_to": result.get("broadcast_to", 0),
+        "results": result.get("results", []),
+    }
+
+
+def action_share_intelligence(input_data):
+    """Share investigation results with the federation network."""
+    title = input_data.get("title", "").strip()
+    content = input_data.get("content", "").strip()
+    if not content:
+        return {"error": "Missing required field: 'content'", "error_code": "MISSING_FIELD"}
+
+    intel_data = {
+        "title": title or "Shared Intelligence",
+        "content": content,
+        "domain": input_data.get("domain", []),
+        "classification": input_data.get("classification", "analysis"),
+        "confidence": input_data.get("confidence", 0.5),
+        "evidence": input_data.get("evidence", []),
+    }
+
+    result, err = http_post("/intelligence", intel_data)
+    if err:
+        return {"error": f"Share failed: {err}", "error_code": "DAEMON_ERROR"}
+
+    return {
+        "status": "shared",
+        "intelligence_id": result.get("id", ""),
+        "broadcast_to": result.get("broadcast_to", 0),
+    }
+
+
+def action_get_peers(input_data):
+    """List connected peers in the federation."""
+    result, err = http_get("/peers")
+    if err:
+        return {"error": f"Cannot get peers: {err}", "error_code": "DAEMON_ERROR"}
+
+    return {
+        "node_id": result.get("node_id", ""),
+        "peers": result.get("peers", []),
+        "total": result.get("total", 0),
+        "active": result.get("active", 0),
+    }
+
+
+def action_get_intelligence(input_data):
+    """Get latest intelligence from the network."""
+    # The FireWire daemon stores intelligence in memory; we read via health + log
+    health, err = http_get("/health")
+    if err:
+        return {"error": f"Cannot reach FireWire daemon: {err}", "error_code": "DAEMON_ERROR"}
+
+    limit = input_data.get("limit", 20)
+
+    # Get recent log entries that are intelligence type
+    log_result, err = http_get(f"/log?page=1&size={min(limit * 2, 200)}")
+    if err:
+        return {"error": f"Cannot get log: {err}", "error_code": "DAEMON_ERROR"}
+
+    entries = log_result.get("entries", [])
+    intel_entries = [
+        e for e in entries
+        if e.get("type", "") in ("intelligence", "firewire/intel/publish")
+    ][:limit]
+
+    return {
+        "node_id": health.get("node_id", ""),
+        "intelligence_count": health.get("intelligence_count", 0),
+        "recent_intelligence": intel_entries,
+        "total_log_entries": log_result.get("total", 0),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
+
+ACTIONS = {
+    "announce": action_announce,
+    "broadcast": action_broadcast,
+    "share-intelligence": action_share_intelligence,
+    "get-peers": action_get_peers,
+    "get-intelligence": action_get_intelligence,
+}
+
+
+def main():
+    try:
+        raw = sys.stdin.read() if not sys.stdin.isatty() else ""
+        if not raw.strip():
+            json.dump({
+                "error": "No input provided. Send JSON on stdin with an 'action' field.",
+                "error_code": "INVALID_INPUT",
+                "details": {
+                    "valid_actions": list(ACTIONS.keys()),
+                    "examples": {
+                        "announce": {"action": "announce", "peer_address": "http://peer-host:7801"},
+                        "broadcast": {"action": "broadcast", "title": "Finding", "content": "Details..."},
+                        "share-intelligence": {"action": "share-intelligence", "content": "Results..."},
+                        "get-peers": {"action": "get-peers"},
+                        "get-intelligence": {"action": "get-intelligence", "limit": 20},
+                    },
+                },
+            }, sys.stdout, indent=2)
+            sys.exit(2)
+
+        input_data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        json.dump({"error": f"Invalid JSON input: {e}", "error_code": "INVALID_INPUT"}, sys.stdout, indent=2)
+        sys.exit(2)
+
+    if not isinstance(input_data, dict):
+        json.dump({"error": "Input must be a JSON object", "error_code": "INVALID_INPUT"}, sys.stdout, indent=2)
+        sys.exit(2)
+
+    action = input_data.get("action", "")
+    if not action:
+        json.dump({
+            "error": "Missing required field: 'action'",
+            "error_code": "MISSING_FIELD",
+            "details": {"valid_actions": list(ACTIONS.keys())},
+        }, sys.stdout, indent=2)
+        sys.exit(2)
+
+    handler = ACTIONS.get(action)
+    if not handler:
+        json.dump({
+            "error": f"Unknown action: '{action}'",
+            "error_code": "UNKNOWN_ACTION",
+            "details": {"valid_actions": list(ACTIONS.keys())},
+        }, sys.stdout, indent=2)
+        sys.exit(2)
+
+    result = handler(input_data)
+    json.dump(result, sys.stdout, indent=2)
+
+    if "error" in result:
+        error_code = result.get("error_code", "")
+        if error_code in ("INVALID_INPUT", "MISSING_FIELD", "UNKNOWN_ACTION"):
+            sys.exit(2)
+        else:
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
