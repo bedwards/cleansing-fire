@@ -163,22 +163,7 @@
   .library-card p { font-size: 20px; color: var(--ash); margin: 0 0 0.3rem; }
   .library-card .meta { font-size: 18px; color: var(--smoke); }
 
-  /* Chat */
-  .chat-container { background: #111; border: 1px solid #222; border-radius: 8px; overflow: hidden; max-width: var(--max-w); margin: 0 auto 2rem; position: relative; z-index: 1; }
-  .chat-header { padding: 1rem; border-bottom: 1px solid #222; font-size: 20px; color: var(--fire-2); display: flex; align-items: center; gap: 0.5rem; }
-  .chat-header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fire-1); }
-  .chat-messages { padding: 1rem; min-height: 150px; max-height: 400px; overflow-y: auto; }
-  .chat-msg { margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px; max-width: 85%; line-height: 1.6; font-size: 20px; }
-  .chat-msg.system { background: rgba(255,68,0,0.1); color: var(--ash); font-style: italic; }
-  .chat-msg.user { background: #1a1a1a; color: var(--bone); margin-left: auto; }
-  .chat-msg.ai { background: #0d1117; color: #ccc; border-left: 2px solid var(--fire-1); }
-  .chat-input-area { display: flex; border-top: 1px solid #222; }
-  .chat-input { flex: 1; background: #0a0a0a; border: none; color: var(--bone); padding: 1rem; font-family: var(--font); font-size: 20px; }
-  .chat-input:focus { outline: none; background: #111; }
-  .chat-input::placeholder { color: var(--smoke); }
-  .chat-send { background: var(--fire-1); color: #fff; border: none; padding: 1rem 1.5rem; cursor: pointer; font-family: var(--font); font-weight: 700; }
-  .chat-send:hover { background: var(--fire-2); }
-  .chat-send:disabled { background: #333; cursor: not-allowed; }
+
 
   /* CTA box */
   .cta-box {
@@ -227,7 +212,7 @@
     <li><a href="#principles">Principles</a></li>
     <li><a href="#start">Get Started</a></li>
     <li><a href="#library">Research</a></li>
-    <li><a href="#chat">Ask the Fire</a></li>
+
     <li><a href="agents.html">For AI Agents</a></li>
   </ul>
 </nav>
@@ -262,7 +247,7 @@
   <div class="principle"><div class="principle-number">V</div><div class="principle-name">Minimum Viable Coercion</div><div class="principle-text">Coercion is sometimes necessary, always corrupting, always minimized.</div></div>
   <div class="principle"><div class="principle-number">VI</div><div class="principle-name">Recursive Accountability</div><div class="principle-text">The liberator who exempts themselves has already become the tyrant.</div></div>
   <div class="principle"><div class="principle-number">VII</div><div class="principle-name">Differential Solidarity</div><div class="principle-text">The person inside the machine sees gears invisible from outside.</div></div>
-  <p style="margin-top: 1rem;"><a href="philosophy.md">Read the full philosophical framework &rarr;</a></p>
+  <p style="margin-top: 1rem;"><a href="../philosophy.md">Read the full philosophical framework &rarr;</a></p>
 </section>
 
 <section id="start" aria-labelledby="start-h">
@@ -303,7 +288,7 @@ claude --dangerously-skip-permissions \
   <h2 id="library-h">Research Library</h2>
   <p>Deep research across every domain. Each document is a living investigation.</p>
   <div class="library-grid">
-    <a href="philosophy.md" class="library-card"><span class="tag tag-philosophy">Philosophy</span><h4>Pyrrhic Lucidity</h4><p>7 principles, decision calculus, theory of legitimate power.</p><span class="meta">956 lines</span></a>
+    <a href="../philosophy.md" class="library-card"><span class="tag tag-philosophy">Philosophy</span><h4>Pyrrhic Lucidity</h4><p>7 principles, decision calculus, theory of legitimate power.</p><span class="meta">956 lines</span></a>
     <a href="economics.md" class="library-card"><span class="tag tag-economics">Economics</span><h4>The Ember Economy</h4><p>Demurrage currency, commons protocol, production mesh, structural redistribution.</p><span class="meta">1,675 lines</span></a>
     <a href="historical-research.md" class="library-card"><span class="tag tag-history">History</span><h4>Power Rebalancing</h4><p>What has actually worked to shift power throughout history.</p><span class="meta">1,197 lines</span></a>
     <a href="technology-research.md" class="library-card"><span class="tag tag-tech">Technology</span><h4>Tech Landscape</h4><p>Tools, APIs, platforms for civic action.</p><span class="meta">773 lines</span></a>
@@ -335,21 +320,6 @@ claude --dangerously-skip-permissions \
   </div>
 </section>
 
-<section id="chat" aria-labelledby="chat-h">
-  <h2 id="chat-h">Ask the Fire</h2>
-  <p>Ask questions about the project, the philosophy, or how to get involved. Powered by Gemini. Grounded in Pyrrhic Lucidity.</p>
-</section>
-</div>
-
-<div class="chat-container" style="max-width: var(--max-w); margin: 0 auto 2rem; position: relative; z-index: 1;">
-  <div class="chat-header"><span class="dot"></span><span>The Fire Speaks</span></div>
-  <div class="chat-messages" id="chat-messages" aria-live="polite">
-    <div class="chat-msg system">Contaminated, and still answering. Ask me anything about Cleansing Fire.</div>
-  </div>
-  <form class="chat-input-area" id="chat-form">
-    <input type="text" id="chat-input" class="chat-input" placeholder="Ask anything..." autocomplete="off" aria-label="Your question">
-    <button type="submit" class="chat-send" id="chat-send">Send</button>
-  </form>
 </div>
 
 <div class="content">
@@ -393,11 +363,7 @@ btnTTS.onclick=()=>{if(!('speechSynthesis'in window)){alert('TTS not supported')
 document.getElementById('btn-contrast').onclick=function(){document.body.classList.toggle('high-contrast');this.classList.toggle('active');};
 // Font
 let fs=105;document.getElementById('btn-font-up').onclick=()=>{fs=Math.min(150,fs+10);document.body.style.fontSize=fs+'%';};document.getElementById('btn-font-down').onclick=()=>{fs=Math.max(70,fs-10);document.body.style.fontSize=fs+'%';};
-// Chat
-const GEMINI_CTX=`You are the voice of Cleansing Fire, operating under Pyrrhic Lucidity. Never claim purity. Be specific about mechanisms. Include what the reader can DO. Acknowledge the cost. Keep responses to 2-4 paragraphs. The project builds decentralized tech to shift power from concentrated authority toward people. 7 Principles: Lucidity, Relational Agency, Transparent Mechanism, Adversarial Collaboration, Minimum Viable Coercion, Recursive Accountability, Differential Solidarity. Human interface is Claude Code CLI with Claude Opus 4.6.`;
-const cm=document.getElementById('chat-messages');
-function addMsg(t,c){const m=document.createElement('div');m.className='chat-msg '+c;m.textContent=t;cm.appendChild(m);cm.scrollTop=cm.scrollHeight;return m;}
-document.getElementById('chat-form').onsubmit=async(ev)=>{ev.preventDefault();const q=document.getElementById('chat-input').value.trim();if(!q)return;addMsg(q,'user');document.getElementById('chat-input').value='';document.getElementById('chat-send').disabled=true;const th=addMsg('Burning...','system');try{const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=REDACTED_API_KEY',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_instruction:{parts:[{text:GEMINI_CTX}]},contents:[{parts:[{text:q}]}],generationConfig:{temperature:0.8,maxOutputTokens:1024}})});th.remove();if(!r.ok){addMsg('API error — try again.','system');}else{const d=await r.json();addMsg(d.candidates?.[0]?.content?.parts?.[0]?.text||'No response.','ai');}}catch(e){th.remove();addMsg('Network error.','system');}document.getElementById('chat-send').disabled=false;document.getElementById('chat-input').focus();};
+
 // Fade in
 const obs=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.style.animation='fadeIn 0.6s ease-out forwards';obs.unobserve(e.target);}});},{threshold:0.1});
 document.querySelectorAll('section').forEach(s=>{s.style.opacity='0';obs.observe(s);});
