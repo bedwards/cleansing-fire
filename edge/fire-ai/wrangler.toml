@@ -1,0 +1,100 @@
+# =============================================================================
+# fire-ai: AI Inference Worker
+# =============================================================================
+# Dedicated AI inference endpoint using Cloudflare Workers AI.
+# Handles text analysis, embedding generation, summarization, and
+# content classification. Called by fire-api via service binding.
+#
+# This worker is intentionally separate from fire-api because:
+# 1. AI inference has different scaling characteristics (CPU-heavy)
+# 2. We can rate-limit and cache AI calls independently
+# 3. AI model bindings are isolated from the API gateway
+# 4. We can upgrade models without touching the API layer
+#
+# Deployment: Automatic via GitHub Actions on push to main.
+# Manual: npx wrangler deploy
+# Local dev: npx wrangler dev
+# =============================================================================
+
+name = "fire-ai"
+main = "src/index.js"
+
+# Use the latest compatibility date for access to newest runtime features.
+compatibility_date = "2026-02-24"
+
+# -----------------------------------------------------------------------------
+# Workers AI Binding
+# -----------------------------------------------------------------------------
+# The AI binding provides access to all Workers AI models. No additional
+# configuration needed -- model selection happens in application code.
+#
+# Available models (as of Feb 2026):
+#   Text generation:
+#     @cf/meta/llama-3.3-70b-instruct-fp8-fast  (deep analysis)
+#     @cf/meta/llama-4-scout-17b-16e-instruct    (multimodal)
+#     @cf/mistral/mistral-7b-instruct-v0.2       (fast, cheap)
+#     @cf/qwen/qwen2.5-coder-32b-instruct        (code analysis)
+#     @cf/glm/glm-4.7-flash                      (multilingual, 131K context)
+#   Embeddings:
+#     @cf/baai/bge-m3                             (multilingual, 100+ languages)
+#   Classification:
+#     @cf/meta/llama-guard-3-8b                   (content safety)
+#   Summarization:
+#     Uses the text generation models with summarization prompts
+# -----------------------------------------------------------------------------
+
+[ai]
+binding = "AI"
+
+# -----------------------------------------------------------------------------
+# Vectorize Index
+# -----------------------------------------------------------------------------
+# VECTOR_INDEX: Stores and queries vector embeddings for semantic search
+# over civic data. Integrated with Workers AI for embedding generation.
+# Supports up to 5 million vectors per index.
+# -----------------------------------------------------------------------------
+
+[[vectorize]]
+binding = "VECTOR_INDEX"
+index_name = "civic-embeddings"
+
+# -----------------------------------------------------------------------------
+# KV Namespace
+# -----------------------------------------------------------------------------
+# AI_CACHE: Caches AI inference results to avoid redundant model calls.
+# Key format: model:hash(input) -> JSON result
+# TTL varies by operation type (embeddings cached longer than analyses).
+# -----------------------------------------------------------------------------
+
+[[kv_namespaces]]
+binding = "AI_CACHE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"    # Create via: npx wrangler kv namespace create AI_CACHE
+
+# -----------------------------------------------------------------------------
+# AI Gateway (optional, recommended for production)
+# -----------------------------------------------------------------------------
+# When configured, all Workers AI calls are routed through AI Gateway for:
+# - Request/response logging (debugging, auditing)
+# - Caching of identical requests (cost savings)
+# - Rate limiting per gateway
+# - Unified billing for third-party model calls
+#
+# To enable: create a gateway in the Cloudflare dashboard, then uncomment:
+# [ai.gateway]
+# id = "fire-ai-gateway"
+# cache_ttl = 3600          # Cache identical requests for 1 hour
+# rate_limit = 100          # Max 100 requests per minute
+# log_level = "full"        # Log all requests and responses
+
+# -----------------------------------------------------------------------------
+# Environment: Staging
+# -----------------------------------------------------------------------------
+# [env.staging]
+# name = "fire-ai-staging"
+
+# -----------------------------------------------------------------------------
+# Limits
+# -----------------------------------------------------------------------------
+# AI inference is CPU-intensive. Allow more CPU time than the API gateway.
+# [limits]
+# cpu_ms = 100    # Maximum CPU time per request in milliseconds

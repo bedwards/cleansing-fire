@@ -26,6 +26,12 @@ node_modules/
 *.log
 /tmp/
 
+# Claude Code local files (not committed)
+.claude/settings.local.json
+.claude/change.log
+.claude/agent-memory-local/
+CLAUDE.local.md
+
 # IDE
 .vscode/
 .idea/

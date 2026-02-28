@@ -1,0 +1,125 @@
+# =============================================================================
+# fire-api: Main API Gateway Worker
+# =============================================================================
+# The public entry point for all Cleansing Fire API requests.
+# Handles investigation queries, legislation lookup, spending search,
+# and proxies AI requests to fire-ai via service binding.
+#
+# Deployment: Automatic via GitHub Actions on push to main.
+# Manual: npx wrangler deploy
+# Local dev: npx wrangler dev
+# =============================================================================
+
+name = "fire-api"
+main = "src/index.js"
+
+# Use the latest compatibility date for access to newest runtime features.
+# Update this periodically as new features become available.
+compatibility_date = "2026-02-24"
+
+# ES modules format (required for service bindings and modern Workers features)
+# Wrangler v4 defaults to this, but we set it explicitly for clarity.
+
+# -----------------------------------------------------------------------------
+# KV Namespaces
+# -----------------------------------------------------------------------------
+# CACHE: Stores cached API responses (investigation results, bill data, etc.)
+# to reduce D1 queries and AI inference calls. TTLs set in application code.
+#
+# CONFIG: System configuration, feature flags, node registry, rate limit
+# counters. Read frequently, written rarely.
+# -----------------------------------------------------------------------------
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespace create CACHE
+# preview_id = "REPLACE_FOR_DEV"          # Create via: npx wrangler kv namespace create CACHE --preview
+
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"       # Create via: npx wrangler kv namespace create CONFIG
+
+# -----------------------------------------------------------------------------
+# D1 Database
+# -----------------------------------------------------------------------------
+# CIVIC_DB: The primary relational database for structured civic data.
+# Contains legislation, spending records, entity information, voting records.
+# Read replicas are distributed globally by Cloudflare automatically.
+#
+# In production, we will shard by jurisdiction (civic_federal, civic_us_ny, etc.)
+# but for Phase 1 we use a single database.
+# -----------------------------------------------------------------------------
+
+[[d1_databases]]
+binding = "CIVIC_DB"
+database_name = "civic-data"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"   # Create via: npx wrangler d1 create civic-data
+
+# -----------------------------------------------------------------------------
+# R2 Bucket
+# -----------------------------------------------------------------------------
+# MEDIA: Stores investigation media -- documents, images, PDFs, audio,
+# generated SVGs, and any large binary data. Zero egress fees.
+# -----------------------------------------------------------------------------
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "fire-media"
+# preview_bucket_name = "fire-media-preview"   # For local dev
+
+# -----------------------------------------------------------------------------
+# Service Binding
+# -----------------------------------------------------------------------------
+# FIRE_AI: Internal binding to the fire-ai worker. Calls from fire-api to
+# fire-ai go through Cloudflare's internal network, not the public internet.
+# Zero additional latency, no egress charges, no authentication needed.
+# -----------------------------------------------------------------------------
+
+[[services]]
+binding = "FIRE_AI"
+service = "fire-ai"
+
+# -----------------------------------------------------------------------------
+# Queue Producer
+# -----------------------------------------------------------------------------
+# TASK_QUEUE: Outbound queue for async task dispatch. fire-api enqueues work
+# (data ingestion, bulk analysis, notifications) and other workers consume.
+# Available on free tier as of February 2026.
+# -----------------------------------------------------------------------------
+
+[[queues.producers]]
+binding = "TASK_QUEUE"
+queue = "fire-task-queue"
+
+# -----------------------------------------------------------------------------
+# Environment: Staging
+# -----------------------------------------------------------------------------
+# Override bindings for staging environment.
+# Deploy with: npx wrangler deploy --env staging
+# -----------------------------------------------------------------------------
+
+# [env.staging]
+# name = "fire-api-staging"
+# [[env.staging.kv_namespaces]]
+# binding = "CACHE"
+# id = "REPLACE_WITH_STAGING_KV_ID"
+
+# -----------------------------------------------------------------------------
+# Custom Domain (configure after initial deployment)
+# -----------------------------------------------------------------------------
+# routes = [
+#   { pattern = "api.cleansingfire.org/*", zone_name = "cleansingfire.org" }
+# ]
+
+# -----------------------------------------------------------------------------
+# Observability
+# -----------------------------------------------------------------------------
+# Tail workers and logging can be configured here.
+# [observability]
+# enabled = true
+
+# -----------------------------------------------------------------------------
+# Limits
+# -----------------------------------------------------------------------------
+# [limits]
+# cpu_ms = 50   # Maximum CPU time per request in milliseconds
