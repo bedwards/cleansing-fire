@@ -4,16 +4,71 @@
       "name": "health-check",
       "schedule": "*/5 * * * *",
       "type": "shell",
-      "command": "curl -sf http://127.0.0.1:7800/health > /dev/null && echo ok || echo gatekeeper-down",
-      "enabled": true
+      "command": "curl -sf http://127.0.0.1:7800/health > /dev/null && echo gatekeeper=ok || echo gatekeeper=down; curl -sf http://127.0.0.1:7801/health > /dev/null && echo firewire=ok || echo firewire=down",
+      "enabled": true,
+      "category": "system"
     },
     {
       "name": "git-status-report",
       "schedule": "0 */6 * * *",
       "type": "shell",
       "command": "git status --porcelain && git log --oneline -5",
-      "enabled": true
+      "enabled": true,
+      "category": "system"
     },
+
+    {
+      "name": "news-scan-trending",
+      "schedule": "*/15 * * * *",
+      "type": "plugin",
+      "plugin": "news-monitor",
+      "input": {
+        "action": "trending",
+        "analyze": false
+      },
+      "enabled": true,
+      "category": "sense",
+      "description": "Scan news feeds every 15 minutes for power-related developments"
+    },
+    {
+      "name": "news-scan-corruption",
+      "schedule": "0 */2 * * *",
+      "type": "plugin",
+      "plugin": "news-monitor",
+      "input": {
+        "action": "monitor",
+        "terms": ["corruption", "dark money", "lobbying scandal", "regulatory capture", "antitrust"],
+        "analyze": false
+      },
+      "enabled": true,
+      "category": "sense",
+      "description": "Deep scan for corruption-related news every 2 hours"
+    },
+    {
+      "name": "news-scan-surveillance",
+      "schedule": "30 */3 * * *",
+      "type": "plugin",
+      "plugin": "news-monitor",
+      "input": {
+        "action": "monitor",
+        "terms": ["surveillance", "facial recognition", "data breach", "privacy violation", "NSA"],
+        "analyze": false
+      },
+      "enabled": true,
+      "category": "sense",
+      "description": "Surveillance and privacy news every 3 hours"
+    },
+
+    {
+      "name": "github-issue-check",
+      "schedule": "0 * * * *",
+      "type": "shell",
+      "command": "gh issue list --assignee=@me --state=open --json number,title,labels --limit 20 2>/dev/null || echo '{\"error\": \"gh not available\"}'",
+      "enabled": true,
+      "category": "sense",
+      "description": "Check for assigned GitHub issues every hour"
+    },
+
     {
       "name": "legislative-scan-privacy",
       "schedule": "0 8 * * 1",
@@ -24,6 +79,7 @@
         "keywords": ["surveillance", "encryption", "privacy", "facial recognition", "data collection"]
       },
       "enabled": false,
+      "category": "sense",
       "note": "Enable after setting LEGISCAN_API_KEY"
     },
     {
@@ -36,6 +92,7 @@
         "keywords": ["antitrust", "monopoly", "merger", "competition", "market concentration"]
       },
       "enabled": false,
+      "category": "sense",
       "note": "Enable after setting LEGISCAN_API_KEY"
     },
     {
@@ -48,19 +105,22 @@
         "keywords": ["FOIA", "transparency", "whistleblower", "public records", "disclosure"]
       },
       "enabled": false,
+      "category": "sense",
       "note": "Enable after setting LEGISCAN_API_KEY"
     },
+
     {
-      "name": "spending-watchdog-defense",
+      "name": "spending-watchdog-surveillance",
       "schedule": "0 9 * * 4",
       "type": "plugin",
       "plugin": "civic-spending",
       "input": {
         "action": "search",
         "keyword": "surveillance technology",
-        "fiscal_year": 2025
+        "fiscal_year": 2026
       },
-      "enabled": true
+      "enabled": true,
+      "category": "sense"
     },
     {
       "name": "spending-watchdog-consulting",
@@ -70,9 +130,157 @@
       "input": {
         "action": "search",
         "keyword": "consulting services",
-        "fiscal_year": 2025
+        "fiscal_year": 2026
       },
-      "enabled": true
+      "enabled": true,
+      "category": "sense"
+    },
+    {
+      "name": "spending-watchdog-ai",
+      "schedule": "0 9 * * 6",
+      "type": "plugin",
+      "plugin": "civic-spending",
+      "input": {
+        "action": "search",
+        "keyword": "artificial intelligence",
+        "fiscal_year": 2026
+      },
+      "enabled": true,
+      "category": "sense"
+    },
+
+    {
+      "name": "investigate-random",
+      "schedule": "0 */4 * * *",
+      "type": "claude",
+      "prompt": "Run a random civic investigation. Pick one of the investigation templates from investigations/ — choose corporate-entity.md, politician.md, dark-money.md, government-contract.md, or industry-capture.md at random. Select a real-world target based on recent news or trends. Execute the investigation using available plugins. Save results to output/investigations/. Be thorough but concise.",
+      "timeout": 600,
+      "enabled": true,
+      "category": "analyze",
+      "description": "Run a random investigation every 4 hours using Claude Code"
+    },
+
+    {
+      "name": "cross-reference-daily",
+      "schedule": "0 14 * * *",
+      "type": "claude",
+      "prompt": "Review all results from today's scans in output/daily-*/ and /tmp/cleansing-fire-scheduler/task-results.jsonl. Cross-reference findings: look for entities that appear in multiple contexts (legislation + spending + news), connections between corporate donors and legislation, and patterns of coordinated action. Write a brief cross-reference report to output/cross-reference/.",
+      "timeout": 300,
+      "enabled": true,
+      "category": "analyze",
+      "description": "Cross-reference the day's findings for hidden connections"
+    },
+
+    {
+      "name": "forge-social-content",
+      "schedule": "0 */12 * * *",
+      "type": "shell",
+      "command": "scripts/generate-content.sh --social \"$(python3 -c \"import json,glob,os; files=sorted(glob.glob('output/daily-*/daily-digest.json'))[-1:]; d=json.load(open(files[0])) if files else {}; print(d.get('content','power and accountability')[:200])\" 2>/dev/null || echo 'power and accountability')\" --tone sardonic --save",
+      "enabled": false,
+      "category": "create",
+      "description": "Generate social media content from latest findings every 12 hours",
+      "note": "Enable when content distribution pipeline is configured"
+    },
+    {
+      "name": "forge-thread",
+      "schedule": "0 10 * * 1,4",
+      "type": "claude",
+      "prompt": "Review the most significant findings from the past 48 hours. Generate a social media thread (6-10 posts) that explains the findings in accessible language. Use the forge-voice plugin with action 'thread'. Make it compelling, factual, and shareable. Save the thread to output/content/.",
+      "timeout": 300,
+      "enabled": true,
+      "category": "create",
+      "description": "Generate investigation threads twice a week"
+    },
+    {
+      "name": "forge-visualization",
+      "schedule": "0 16 * * 3",
+      "type": "claude",
+      "prompt": "Create a data visualization from recent investigation results. Use the forge-vision plugin. Choose the most impactful dataset from the last week's findings — money flows, voting patterns, corporate connections, or spending trends. Generate an SVG visualization and save to output/visualizations/.",
+      "timeout": 300,
+      "enabled": true,
+      "category": "create",
+      "description": "Generate a data visualization weekly"
+    },
+
+    {
+      "name": "deep-research",
+      "schedule": "0 2 * * *",
+      "type": "claude",
+      "prompt": "Research a trending power-related topic. Choose something from recent news scans that deserves deeper investigation. Introduce a bit of chaos — look at the topic from unexpected angles, draw connections to seemingly unrelated domains. Write a research document in docs/ following the project's existing research doc patterns. Be creative but factual. Aim for 500-1000 lines.",
+      "timeout": 900,
+      "enabled": true,
+      "category": "analyze",
+      "description": "Deep research a trending topic daily at 2 AM"
+    },
+
+    {
+      "name": "self-update",
+      "schedule": "0 3 * * *",
+      "type": "shell",
+      "command": "git fetch origin && git diff HEAD origin/main --stat | head -20 && git pull --rebase origin main && scripts/verify-integrity.sh",
+      "enabled": true,
+      "category": "improve",
+      "description": "Pull latest code and verify integrity daily at 3 AM"
+    },
+    {
+      "name": "self-improve",
+      "schedule": "0 4 * * 0",
+      "type": "claude",
+      "prompt": "Review the last week of scheduler task results in /tmp/cleansing-fire-scheduler/task-results.jsonl. Identify: (1) tasks that consistently fail and why, (2) tasks that produce low-quality results, (3) gaps in coverage — topics or data sources we should be monitoring but aren't, (4) plugin improvements needed. Create GitHub issues for the top 3 improvements. Do NOT modify code directly — only create issues.",
+      "timeout": 600,
+      "enabled": true,
+      "category": "improve",
+      "description": "Weekly self-assessment and improvement proposals"
+    },
+
+    {
+      "name": "firewire-heartbeat",
+      "schedule": "*/10 * * * *",
+      "type": "shell",
+      "command": "curl -sf http://127.0.0.1:7801/health > /dev/null && curl -sf -X POST http://127.0.0.1:7801/heartbeat || echo firewire=down",
+      "enabled": true,
+      "category": "distribute",
+      "description": "Send heartbeat to federation network every 10 minutes"
+    },
+    {
+      "name": "firewire-share-intelligence",
+      "schedule": "0 */6 * * *",
+      "type": "shell",
+      "command": "if curl -sf http://127.0.0.1:7801/health > /dev/null 2>&1; then LATEST=$(ls -t output/investigations/*.json 2>/dev/null | head -1); if [ -n \"$LATEST\" ]; then curl -sf -X POST http://127.0.0.1:7801/intelligence -H 'Content-Type: application/json' -d @\"$LATEST\"; fi; fi",
+      "enabled": true,
+      "category": "distribute",
+      "description": "Share latest investigation results with federation network"
+    },
+    {
+      "name": "firewire-sync-peers",
+      "schedule": "0 */3 * * *",
+      "type": "shell",
+      "command": "curl -sf http://127.0.0.1:7801/peers 2>/dev/null || echo '{\"error\": \"firewire not running\"}'",
+      "enabled": true,
+      "category": "distribute",
+      "description": "Sync peer list from federation network"
+    },
+
+    {
+      "name": "daily-fire",
+      "schedule": "0 6 * * *",
+      "type": "shell",
+      "command": "scripts/daily-fire.sh",
+      "timeout": 1800,
+      "enabled": true,
+      "category": "analyze",
+      "description": "Full daily cycle: health, legislative scans, spending, digest, commit"
+    },
+
+    {
+      "name": "weekly-power-report",
+      "schedule": "0 8 * * 0",
+      "type": "claude",
+      "prompt": "Generate a comprehensive weekly power shift report. Review all investigation results, news scans, legislative findings, spending data, and cross-references from the past 7 days. Identify: (1) the most significant power shifts this week, (2) emerging threats to democratic accountability, (3) positive developments and victories, (4) entities that appeared most frequently across investigations, (5) recommended priorities for next week. Format as a polished report suitable for human readers. Save to docs/ as a weekly report.",
+      "timeout": 900,
+      "enabled": true,
+      "category": "create",
+      "description": "Weekly comprehensive power shift report"
     }
   ],
   "event_tasks": [
@@ -82,11 +290,38 @@
       "source_config": {
         "pattern": "docs/*.md"
       },
-      "type": "gatekeeper",
-      "prompt": "A documentation file in the Cleansing Fire project has been updated. Generate a brief changelog entry summarizing what might have changed.",
-      "sync": true,
-      "enabled": false,
-      "note": "Enable for doc change monitoring"
+      "type": "shell",
+      "command": "echo 'doc changed' && git diff --stat docs/",
+      "enabled": true,
+      "category": "system"
+    },
+    {
+      "name": "plugin-updated",
+      "source_type": "file_watcher",
+      "source_config": {
+        "pattern": "plugins/*"
+      },
+      "type": "shell",
+      "command": "chmod +x plugins/* && echo 'plugins re-armed'",
+      "enabled": true,
+      "category": "system"
+    },
+    {
+      "name": "investigation-completed",
+      "source_type": "file_watcher",
+      "source_config": {
+        "pattern": "output/investigations/*.json"
+      },
+      "type": "shell",
+      "command": "echo 'new investigation result detected'",
+      "enabled": true,
+      "category": "sense",
+      "description": "Trigger when a new investigation result appears",
+      "on_success": {
+        "name": "share-new-investigation",
+        "type": "shell",
+        "command": "LATEST=$(ls -t output/investigations/*.json 2>/dev/null | head -1); if [ -n \"$LATEST\" ] && curl -sf http://127.0.0.1:7801/health > /dev/null 2>&1; then curl -sf -X POST http://127.0.0.1:7801/intelligence -H 'Content-Type: application/json' -d @\"$LATEST\"; fi"
+      }
     }
   ]
 }
