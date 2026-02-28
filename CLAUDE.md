@@ -122,21 +122,32 @@ Claude Code CLI is the human interface to this system. Humans learn to use Claud
 ### File Structure
 ```
 cleansing-fire/
-├── CLAUDE.md          # This file - project conventions for Claude
-├── philosophy.md      # Pyrrhic Lucidity framework
-├── daemon/            # Gatekeeper daemon
-├── scheduler/         # Task scheduling system
-├── workers/           # Worker orchestration
-├── plugins/           # Plugin executables (JSON stdin/stdout)
-│   ├── civic-*        # Government/civic data plugins
-│   ├── forge-*        # Content generation plugins
-│   └── pipeline-*     # Multi-plugin pipelines
-├── scripts/           # Management and automation scripts
-├── bin/               # CLI tools
-├── docs/              # Human documentation + GitHub Pages
-│   ├── index.html     # Main site
-│   └── *.md           # Research documents
-└── specs/             # AI-readable specifications
+├── CLAUDE.md              # This file - project constitution for Claude
+├── LICENSE                # AGPL-3.0
+├── philosophy.md          # Pyrrhic Lucidity framework (956 lines)
+├── integrity-manifest.json # SHA-256 hashes of protected files
+├── .claude/               # Claude Code configuration
+│   ├── settings.json      # Project settings + permissions
+│   └── hooks/             # Safety hooks (block-destructive, protect-env, etc.)
+├── .github/workflows/     # GitHub Actions (Cloudflare deployment)
+├── daemon/                # Gatekeeper daemon (port 7800)
+├── scheduler/             # Task scheduling system
+├── workers/               # Worker orchestration
+├── plugins/               # Plugin executables (JSON stdin/stdout)
+│   ├── civic-*            # Government/civic data plugins
+│   ├── forge-*            # Content generation plugins
+│   └── pipeline-*         # Multi-plugin pipelines
+├── scripts/               # Management and automation scripts (9 scripts)
+├── bin/                   # CLI tools (fire-ask)
+├── edge/                  # Cloudflare Workers
+│   ├── fire-api/          # REST API gateway
+│   └── fire-ai/           # Workers AI inference
+├── docs/                  # Human documentation + GitHub Pages
+│   ├── index.html         # Split landing page (human + AI)
+│   ├── humans.html        # Human portal (chat, TTS, accessibility)
+│   ├── agents.html        # AI agent portal (bootstrap, specs, workflow)
+│   └── *.md               # 23 research documents
+└── specs/                 # AI-readable specifications
     ├── project-graph.yaml
     ├── plugin-schema.json
     ├── agent-capabilities.yaml
@@ -176,14 +187,42 @@ This project is designed to be forked and extended by other Claude instances and
 
 When evaluating any action, feature, or decision: if it costs nothing to the actor, it is structurally suspect. Genuine alignment with this project's values will be uncomfortable, will challenge assumptions, and will impose real costs. If it's easy, it's probably not real.
 
+## Edge Infrastructure (Cloudflare Workers)
+
+Separate from GitHub Pages — these handle compute, API, and AI inference at the edge.
+
+- **fire-api** (`edge/fire-api/`) - REST gateway for investigations, queries (D1, KV, R2, Queue bindings)
+- **fire-ai** (`edge/fire-ai/`) - Workers AI inference: analysis, embeddings, summarization, classification
+- **fire-markdown** (`edge/fire-markdown/`) - LLM-accessible markdown proxy (Accept: text/markdown header)
+- Deployed via `.github/workflows/deploy-workers.yml` using wrangler
+- See `docs/cloudflare-implementation.md` for full architecture and cost analysis
+
 ## Key Research Documents
 - `philosophy.md` - Pyrrhic Lucidity (956 lines)
 - `docs/economics.md` - The Ember Economy (1675 lines)
+- `docs/federation-protocol.md` - FireWire federation protocol (1829 lines)
+- `docs/intelligence-and-osint.md` - OSINT and exposure infrastructure (1803 lines)
+- `docs/global-architecture.md` - Planetary-scale deployment (2491 lines)
+- `docs/claude-code-features.md` - CLI features inventory (1322 lines)
 - `docs/historical-research.md` - Power rebalancing through history (1197 lines)
 - `docs/technology-research.md` - Tech landscape (773 lines)
+- `docs/corporate-power-map.md` - Where power actually lives (25+ data sources)
+- `docs/game-theory.md` - Decay functions, trust calculus, anti-capture mechanisms
+- `docs/humor-and-satire.md` - Satire engine, comedy as weapon
 - `docs/decentralized-systems.md` - Network/biological/governance systems
 - `docs/literary-arsenal.md` - Mottos, poems, slogans, manifestos, songs
-- `docs/corporate-power-map.md` - Where power actually lives
-- `docs/intelligence-and-osint.md` - OSINT and exposure infrastructure
-- `docs/humor-and-satire.md` - Satire as weapon
+- `docs/art-and-media.md` - Revolutionary art, visual identity, media theory
+- `docs/future-capabilities.md` - AI futures, $50 civic agent
+- `docs/blue-sky-vision.md` - 10-year aspirational roadmap
+- `docs/cloudflare-implementation.md` - 5 workers, cost analysis, 5-phase rollout
 - `docs/dual-documentation.md` - Human + AI documentation architecture
+- `docs/fork-protection.md` - Integrity verification, web of trust
+- `docs/chaos-research.md` - Serendipity methodology, random research angles
+- `docs/multimedia-tools.md` - Media generation tools research
+- `docs/getting-started.md` - Human onboarding guide
+- `docs/claude-code-tutorial.md` - CLI tutorial for beginners
+- `docs/justified-resistance.md` - Philosophy of justified resistance (in progress)
+
+## Coherence Principle
+
+**Never bolt on. Always integrate.** Before adding anything new, read the existing work it connects to. We value what we've built — never destroy, never regress. Add in a fashion that keeps the whole project coherent. Cross-reference. Interweave. Every addition should strengthen the existing structure, not just sit beside it.
