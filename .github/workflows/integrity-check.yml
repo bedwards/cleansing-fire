@@ -1,0 +1,83 @@
+name: Integrity Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check file integrity
+        run: |
+          # Verify critical files exist
+          echo "=== Checking critical files ==="
+          for f in CLAUDE.md LICENSE philosophy.md integrity-manifest.json; do
+            if [ -f "$f" ]; then
+              echo "OK: $f exists"
+            else
+              echo "FAIL: $f missing"
+              exit 1
+            fi
+          done
+
+          # Verify AGPL-3.0 license
+          echo ""
+          echo "=== Checking license ==="
+          if grep -q "GNU AFFERO GENERAL PUBLIC LICENSE" LICENSE; then
+            echo "OK: AGPL-3.0 license verified"
+          else
+            echo "FAIL: License is not AGPL-3.0"
+            exit 1
+          fi
+
+          # Verify 7 Principles are present in philosophy.md
+          echo ""
+          echo "=== Checking 7 Principles ==="
+          PRINCIPLES=(
+            "Lucidity Before Liberation"
+            "Relational Agency"
+            "Transparent Mechanism"
+            "Adversarial Collaboration"
+            "Minimum Viable Coercion"
+            "Recursive Accountability"
+            "Differential Solidarity"
+          )
+          for p in "${PRINCIPLES[@]}"; do
+            if grep -q "$p" philosophy.md; then
+              echo "OK: $p found"
+            else
+              echo "FAIL: $p missing from philosophy.md"
+              exit 1
+            fi
+          done
+
+          # Verify no secrets in committed files
+          echo ""
+          echo "=== Checking for exposed secrets ==="
+          if grep -rn "AIzaSy\|sk-ant-\|AKIA\|-----BEGIN.*PRIVATE KEY" --include='*.py' --include='*.sh' --include='*.js' --include='*.json' --include='*.yaml' --include='*.yml' . 2>/dev/null | grep -v node_modules | grep -v .git; then
+            echo "WARNING: Potential secrets found in committed files"
+            # Don't fail on this — just warn
+          else
+            echo "OK: No obvious secrets in committed files"
+          fi
+
+          echo ""
+          echo "=== Integrity check complete ==="
+
+      - name: Check no .env committed
+        run: |
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "FAIL: .env is tracked by git!"
+            exit 1
+          else
+            echo "OK: .env is not tracked"
+          fi

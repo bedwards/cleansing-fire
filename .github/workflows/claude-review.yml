@@ -1,0 +1,44 @@
+name: Claude Code PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-review') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Review PR with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: claude-opus-4-6
+          direct_prompt: |
+            You are a Cleansing Fire review worker. Review this PR following CLAUDE.md conventions.
+
+            ## Review Checklist
+            1. Does it follow project code standards (Python stdlib, shell set -euo pipefail)?
+            2. Does it integrate coherently with existing work (not bolt-on)?
+            3. Are there security issues (exposed secrets, injection vectors)?
+            4. Does it maintain alignment with the 7 Principles of Pyrrhic Lucidity?
+            5. Does it regress or destroy any existing functionality?
+
+            ## Rules
+            - Be thorough but constructive
+            - Flag security issues as blocking
+            - Apply differential solidarity: scrutiny proportional to power held
+            - Apply the cost heuristic: easy changes are structurally suspect
+
+            Provide your review as a GitHub PR review comment.
+          timeout_minutes: 10
