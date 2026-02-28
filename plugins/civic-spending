@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Government Spending Monitor (USAspending)
+
+Queries USAspending.gov API to track federal contracts, grants, and spending.
+Cross-references with campaign finance data for corruption detection.
+
+Input JSON:
+  {"action": "search", "keyword": "surveillance technology"}
+  {"action": "recipient", "name": "Palantir"}
+  {"action": "agency", "code": "097", "fiscal_year": 2025}
+
+Output JSON: varies by action
+
+No API key required - USAspending.gov is fully open.
+"""
+
+import json
+import sys
+import urllib.error
+import urllib.request
+
+SPENDING_BASE = "https://api.usaspending.gov/api/v2"
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+
+def spending_api(endpoint, payload=None, method="POST"):
+    """Call USAspending API."""
+    url = f"{SPENDING_BASE}{endpoint}"
+    if payload:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json"},
+            method=method,
+        )
+    else:
+        req = urllib.request.Request(url, method="GET")
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ask_gatekeeper(prompt):
+    """Submit analysis prompt to gatekeeper."""
+    payload = {
+        "prompt": prompt,
+        "system": "You are a government spending analyst. Follow the money. Flag unusual patterns, sole-source contracts, and potential waste/corruption.",
+        "caller": "plugin:civic-spending",
+        "temperature": 0.2,
+        "max_tokens": 1024,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return None
+    except Exception:
+        return None
+
+
+def search_spending(keyword, fiscal_year=2025):
+    """Search federal spending by keyword."""
+    payload = {
+        "filters": {
+            "keywords": [keyword],
+            "time_period": [{"start_date": f"{fiscal_year}-01-01", "end_date": f"{fiscal_year}-12-31"}],
+        },
+        "fields": [
+            "Award ID", "Recipient Name", "Award Amount",
+            "Awarding Agency", "Award Type", "Description",
+            "Start Date", "End Date",
+        ],
+        "limit": 20,
+        "order": "desc",
+        "sort": "Award Amount",
+    }
+
+    result = spending_api("/search/spending_by_award/", payload)
+    if "error" in result:
+        return result
+
+    awards = []
+    for r in result.get("results", []):
+        awards.append({
+            "award_id": r.get("Award ID"),
+            "recipient": r.get("Recipient Name"),
+            "amount": r.get("Award Amount"),
+            "agency": r.get("Awarding Agency"),
+            "type": r.get("Award Type"),
+            "description": r.get("Description", "")[:200],
+            "start_date": r.get("Start Date"),
+            "end_date": r.get("End Date"),
+        })
+
+    total = sum(a["amount"] for a in awards if a["amount"])
+    return {
+        "keyword": keyword,
+        "fiscal_year": fiscal_year,
+        "awards": awards,
+        "total_amount": total,
+        "count": len(awards),
+    }
+
+
+def search_recipient(name):
+    """Search for a specific recipient's federal awards."""
+    payload = {
+        "filters": {
+            "recipient_search_text": [name],
+        },
+        "fields": [
+            "Award ID", "Recipient Name", "Award Amount",
+            "Awarding Agency", "Award Type", "Description",
+            "Start Date",
+        ],
+        "limit": 20,
+        "order": "desc",
+        "sort": "Award Amount",
+    }
+
+    result = spending_api("/search/spending_by_award/", payload)
+    if "error" in result:
+        return result
+
+    awards = []
+    for r in result.get("results", []):
+        awards.append({
+            "award_id": r.get("Award ID"),
+            "recipient": r.get("Recipient Name"),
+            "amount": r.get("Award Amount"),
+            "agency": r.get("Awarding Agency"),
+            "type": r.get("Award Type"),
+            "description": r.get("Description", "")[:200],
+            "start_date": r.get("Start Date"),
+        })
+
+    total = sum(a["amount"] for a in awards if a["amount"])
+
+    # AI analysis if we have results
+    analysis = None
+    if awards:
+        analysis = ask_gatekeeper(f"""Analyze federal spending to {name}:
+
+Total in top 20 awards: ${total:,.0f}
+Number of awards shown: {len(awards)}
+Agencies: {', '.join(set(a['agency'] for a in awards if a['agency']))}
+Award types: {', '.join(set(a['type'] for a in awards if a['type']))}
+
+Top 5 awards:
+{chr(10).join(f"- ${a['amount']:,.0f} from {a['agency']}: {a['description']}" for a in awards[:5])}
+
+Questions to answer:
+1. Is this spending concentrated or distributed?
+2. Are there unusual patterns (sole-source, timing, amounts)?
+3. What is this money being used for?
+4. Are there transparency concerns?""")
+
+    return {
+        "recipient": name,
+        "awards": awards,
+        "total_amount": total,
+        "count": len(awards),
+        "ai_analysis": analysis,
+    }
+
+
+def agency_spending(agency_code, fiscal_year=2025):
+    """Get top spending by a specific agency."""
+    payload = {
+        "filters": {
+            "agencies": [{"type": "awarding", "tier": "toptier", "name": agency_code}],
+            "time_period": [{"start_date": f"{fiscal_year}-01-01", "end_date": f"{fiscal_year}-12-31"}],
+        },
+        "category": "recipient",
+        "limit": 20,
+    }
+
+    result = spending_api("/search/spending_by_category/", payload)
+    if "error" in result:
+        return result
+
+    return {
+        "agency": agency_code,
+        "fiscal_year": fiscal_year,
+        "results": result.get("results", [])[:20],
+    }
+
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "search")
+
+    if action == "search":
+        result = search_spending(
+            input_data.get("keyword", ""),
+            input_data.get("fiscal_year", 2025),
+        )
+    elif action == "recipient":
+        result = search_recipient(input_data.get("name", ""))
+    elif action == "agency":
+        result = agency_spending(
+            input_data.get("code", ""),
+            input_data.get("fiscal_year", 2025),
+        )
+    else:
+        result = {"error": f"Unknown action: {action}"}
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

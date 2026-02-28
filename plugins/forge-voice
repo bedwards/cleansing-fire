@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: The Forge (Voice Generator)
+
+Transforms data, analysis, and events into human-readable content:
+- Social media posts for Fediverse/Bluesky/Matrix
+- Newsletter digests
+- Spoken word scripts
+- Poetic reframings of dry data
+- Agitprop that tells the truth
+
+The principle: every dataset is a story. Every dollar traced is a poem.
+Every vote recorded is a verse. The Forge turns transparency into narrative.
+
+Input JSON:
+  {"action": "social", "data": {...}, "platform": "mastodon", "tone": "urgent"}
+  {"action": "digest", "items": [...], "period": "weekly"}
+  {"action": "poeticize", "raw_data": "...", "form": "haiku|sonnet|prose|free"}
+  {"action": "agitprop", "issue": "...", "audience": "general|youth|workers|elders"}
+  {"action": "thread", "topic": "...", "sources": [...], "max_posts": 10}
+
+Output JSON: {"content": "...", "type": "...", "metadata": {...}}
+"""
+
+import json
+import os
+import sys
+import urllib.request
+
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+PLATFORM_LIMITS = {
+    "mastodon": 500,
+    "bluesky": 300,
+    "matrix": 4000,
+    "newsletter": 10000,
+}
+
+TONE_PROMPTS = {
+    "urgent": "Write with controlled urgency. Short sentences. No wasted words. This matters NOW.",
+    "analytical": "Write with precision and evidence. Let the facts speak. Cool fire, not hot.",
+    "poetic": "Write with rhythm and metaphor. Make the reader FEEL the data. Beauty is a weapon.",
+    "sardonic": "Write with dark humor and irony. The absurdity of corruption is its own indictment.",
+    "invitational": "Write warmly. This is an invitation to see clearly together. We are all compromised. Come as you are.",
+    "furious": "Write with righteous fury held in grammatical discipline. Controlled burn, not wildfire.",
+}
+
+PYRRHIC_LUCIDITY_VOICE = """You are the voice of the Cleansing Fire project, operating under Pyrrhic Lucidity.
+
+Core voice principles:
+- Never claim purity. We are compromised. Say so.
+- Name specific mechanisms, not vague evils. "Corporate lobbying captured the FCC" not "the system is broken"
+- Always include what the reader/listener can DO
+- Use fire metaphors naturally: forge, ember, ash, controlled burn, phoenix, smoke, light
+- Mix registers: street and scholarly in the same breath
+- The enemy is opacity, not people. Attack hidden mechanisms, not faces.
+- Acknowledge the cost of seeing clearly. Lucidity hurts. Say so.
+- End with invitation, not despair. The fire is already lit. Join or watch."""
+
+
+def ask_gatekeeper(prompt, system="", temperature=0.7, max_tokens=2048):
+    payload = {
+        "prompt": prompt,
+        "system": system or PYRRHIC_LUCIDITY_VOICE,
+        "caller": "plugin:forge-voice",
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout": 180,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=190) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+    except Exception:
+        pass
+    return None
+
+
+def generate_social(data, platform="mastodon", tone="urgent"):
+    """Generate a social media post from data."""
+    char_limit = PLATFORM_LIMITS.get(platform, 500)
+    tone_instruction = TONE_PROMPTS.get(tone, TONE_PROMPTS["urgent"])
+
+    data_str = json.dumps(data, indent=2) if isinstance(data, dict) else str(data)
+
+    prompt = f"""Transform this data into a compelling {platform} post ({char_limit} char max).
+
+DATA:
+{data_str}
+
+TONE: {tone_instruction}
+
+RULES:
+- Must be under {char_limit} characters
+- Include relevant hashtags (2-3 max)
+- If data includes dollar amounts, make them prominent
+- End with a call to action or question
+- Include source attribution if possible
+- Use the #CleansingFire and #PyrrhicLucidity tags
+
+Output ONLY the post text, nothing else."""
+
+    content = ask_gatekeeper(prompt, temperature=0.8)
+    if content:
+        # Enforce character limit
+        if len(content) > char_limit:
+            content = content[:char_limit-3] + "..."
+        return {
+            "content": content,
+            "platform": platform,
+            "char_count": len(content),
+            "type": "social_post",
+        }
+    return {"error": "Generation failed"}
+
+
+def generate_thread(topic, sources=None, max_posts=10, platform="mastodon"):
+    """Generate a threaded series of posts."""
+    char_limit = PLATFORM_LIMITS.get(platform, 500)
+    sources_str = "\n".join(f"- {s}" for s in (sources or []))
+
+    prompt = f"""Create a {max_posts}-post thread for {platform} about: {topic}
+
+{f"SOURCES:{chr(10)}{sources_str}" if sources_str else ""}
+
+RULES:
+- Each post max {char_limit} characters
+- First post hooks the reader
+- Build narrative tension
+- Include data/specifics where possible
+- Last post = call to action
+- Number posts (1/{max_posts}, 2/{max_posts}, etc.)
+- Use #CleansingFire tag in first and last post
+- Separate each post with ---
+
+Apply the principle of Pyrrhic Lucidity: acknowledge complexity, refuse simplification, demand action anyway."""
+
+    content = ask_gatekeeper(prompt, max_tokens=4096, temperature=0.8)
+    if content:
+        posts = [p.strip() for p in content.split("---") if p.strip()]
+        return {
+            "posts": posts[:max_posts],
+            "count": len(posts[:max_posts]),
+            "platform": platform,
+            "type": "thread",
+        }
+    return {"error": "Generation failed"}
+
+
+def generate_digest(items, period="weekly"):
+    """Generate a newsletter digest from items."""
+    items_str = "\n".join(
+        f"- {item.get('title', item.get('summary', str(item)))}"
+        for item in items[:20]
+    )
+
+    prompt = f"""Write a {period} digest newsletter for the Cleansing Fire community.
+
+ITEMS THIS {period.upper()}:
+{items_str}
+
+FORMAT:
+1. Opening (2-3 sentences setting the context, Pyrrhic Lucidity voice)
+2. Top Stories (brief analysis of each, what it means for power dynamics)
+3. Data Point of the Week (one striking number with context)
+4. What You Can Do (3 concrete actions)
+5. Closing (poetic, invitational, fire metaphor)
+
+Keep it under 1000 words. Make it worth reading. Make it worth sharing."""
+
+    content = ask_gatekeeper(prompt, max_tokens=4096)
+    if content:
+        return {"content": content, "period": period, "type": "digest"}
+    return {"error": "Generation failed"}
+
+
+def poeticize(raw_data, form="free"):
+    """Transform raw data into poetry."""
+    forms = {
+        "haiku": "Write exactly 3 haiku (5-7-5 syllable structure). Let the data become image.",
+        "sonnet": "Write a Shakespearean sonnet (14 lines, ABAB CDCD EFEF GG). Formal. Furious.",
+        "prose": "Write a prose poem. Dense. Rhythmic. No line breaks needed, just momentum.",
+        "free": "Write free verse. Let the data dictate the rhythm. Short lines for urgency. Long lines for scope.",
+        "spoken": "Write for performance. Mark beats. Build to crescendo. This will be SAID OUT LOUD.",
+    }
+
+    form_instruction = forms.get(form, forms["free"])
+
+    prompt = f"""Transform this data into poetry.
+
+RAW DATA:
+{raw_data}
+
+FORM: {form_instruction}
+
+The poem must:
+- Make the data FELT, not just understood
+- Use the language of fire, light, and seeing
+- Acknowledge complicity (we are all in this)
+- End with an image that burns into memory
+- Be genuinely good poetry, not greeting card sentiment
+
+Output ONLY the poem."""
+
+    content = ask_gatekeeper(
+        prompt,
+        system="You are a poet in the tradition of Audre Lorde, James Baldwin, Pablo Neruda, and Wislawa Szymborska. You write political poetry that is also great art.",
+        temperature=0.9,
+    )
+    if content:
+        return {"poem": content, "form": form, "source_data": str(raw_data)[:200], "type": "poem"}
+    return {"error": "Generation failed"}
+
+
+def generate_agitprop(issue, audience="general"):
+    """Generate agitprop content for a specific issue and audience."""
+    audiences = {
+        "general": "general public, mixed ages and backgrounds",
+        "youth": "16-25 year olds, digital native, skeptical of institutions, meme-literate",
+        "workers": "working class, practical, time-poor, skeptical of elite activism",
+        "elders": "older adults, experienced, may have protest history, concerned about legacy",
+        "technical": "developers, engineers, hackers, prefer systems thinking and concrete tools",
+    }
+
+    audience_desc = audiences.get(audience, audiences["general"])
+
+    prompt = f"""Create agitprop content about: {issue}
+
+TARGET AUDIENCE: {audience_desc}
+
+Generate ALL of the following:
+1. HEADLINE (max 10 words, stop-you-in-your-tracks)
+2. SUBHEAD (one sentence that complicates the headline)
+3. BODY (100-200 words, the core argument)
+4. CALL TO ACTION (specific, concrete, doable TODAY)
+5. PULLQUOTE (one sentence to share, designed for maximum spread)
+6. VISUAL DESCRIPTION (describe an image that would accompany this - for later generation)
+
+Apply Pyrrhic Lucidity: the content must acknowledge complexity, refuse purity theater, and demand action anyway. No savior narrative. No villain caricature. Just mechanisms made visible and levers made graspable."""
+
+    content = ask_gatekeeper(prompt, max_tokens=2048, temperature=0.8)
+    if content:
+        return {"content": content, "issue": issue, "audience": audience, "type": "agitprop"}
+    return {"error": "Generation failed"}
+
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "social")
+
+    if action == "social":
+        result = generate_social(
+            input_data.get("data", {}),
+            input_data.get("platform", "mastodon"),
+            input_data.get("tone", "urgent"),
+        )
+    elif action == "thread":
+        result = generate_thread(
+            input_data.get("topic", ""),
+            input_data.get("sources"),
+            input_data.get("max_posts", 10),
+            input_data.get("platform", "mastodon"),
+        )
+    elif action == "digest":
+        result = generate_digest(
+            input_data.get("items", []),
+            input_data.get("period", "weekly"),
+        )
+    elif action == "poeticize":
+        result = poeticize(
+            input_data.get("raw_data", ""),
+            input_data.get("form", "free"),
+        )
+    elif action == "agitprop":
+        result = generate_agitprop(
+            input_data.get("issue", ""),
+            input_data.get("audience", "general"),
+        )
+    else:
+        result = {"error": f"Unknown action: {action}"}
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

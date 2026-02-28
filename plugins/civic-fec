@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Campaign Finance Monitor (FEC)
+
+Queries the Federal Election Commission API to track campaign donations,
+expenditures, and financial connections between candidates and donors.
+
+Input JSON:
+  {"action": "candidate", "name": "Smith"}
+  {"action": "donor", "name": "Koch Industries"}
+  {"action": "contributions", "committee_id": "C00012345", "min_amount": 1000}
+  {"action": "crossref", "candidate": "Smith", "donor": "Company X"}
+
+Output JSON: varies by action
+
+FEC API key: set FEC_API_KEY env var (free at api.open.fec.gov)
+"""
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+import urllib.parse
+
+FEC_BASE = "https://api.open.fec.gov/v1"
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+
+def fec_api(endpoint, **params):
+    """Call FEC API."""
+    api_key = os.environ.get("FEC_API_KEY", "DEMO_KEY")
+    params["api_key"] = api_key
+    query = urllib.parse.urlencode(params, doseq=True)
+    url = f"{FEC_BASE}{endpoint}?{query}"
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CleansingFire/0.1"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return {"error": f"FEC API HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ask_gatekeeper(prompt):
+    """Submit analysis prompt to gatekeeper."""
+    payload = {
+        "prompt": prompt,
+        "system": "You are a campaign finance analyst. Be precise about money flows and connections. Flag potential conflicts of interest.",
+        "caller": "plugin:civic-fec",
+        "temperature": 0.2,
+        "max_tokens": 1024,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return None
+    except Exception:
+        return None
+
+
+def search_candidates(name):
+    """Search for candidates by name."""
+    result = fec_api("/candidates/search/", q=name, sort="-election_year", per_page=10)
+    if "error" in result:
+        return result
+
+    candidates = []
+    for c in result.get("results", []):
+        candidates.append({
+            "candidate_id": c.get("candidate_id"),
+            "name": c.get("name"),
+            "party": c.get("party_full"),
+            "office": c.get("office_full"),
+            "state": c.get("state"),
+            "district": c.get("district"),
+            "election_years": c.get("election_years", [])[-3:],
+            "incumbent": c.get("incumbent_challenge_full"),
+            "principal_committees": [
+                {"id": comm.get("committee_id"), "name": comm.get("committee_name")}
+                for comm in c.get("principal_committees", [])
+            ],
+        })
+    return {"candidates": candidates}
+
+
+def search_donors(name):
+    """Search for committee/PAC donors by name."""
+    result = fec_api("/committees/", q=name, sort="-receipts", per_page=10)
+    if "error" in result:
+        return result
+
+    committees = []
+    for c in result.get("results", []):
+        committees.append({
+            "committee_id": c.get("committee_id"),
+            "name": c.get("name"),
+            "type": c.get("committee_type_full"),
+            "party": c.get("party_full"),
+            "treasurer": c.get("treasurer_name"),
+            "total_receipts": c.get("receipts"),
+            "total_disbursements": c.get("disbursements"),
+            "designation": c.get("designation_full"),
+        })
+    return {"committees": committees}
+
+
+def get_contributions(committee_id, min_amount=0):
+    """Get contributions to/from a committee."""
+    params = {
+        "committee_id": committee_id,
+        "sort": "-contribution_receipt_amount",
+        "per_page": 20,
+    }
+    if min_amount:
+        params["min_amount"] = min_amount
+
+    result = fec_api("/schedules/schedule_a/", **params)
+    if "error" in result:
+        return result
+
+    contributions = []
+    for c in result.get("results", []):
+        contributions.append({
+            "contributor": c.get("contributor_name"),
+            "employer": c.get("contributor_employer"),
+            "occupation": c.get("contributor_occupation"),
+            "amount": c.get("contribution_receipt_amount"),
+            "date": c.get("contribution_receipt_date"),
+            "city": c.get("contributor_city"),
+            "state": c.get("contributor_state"),
+        })
+
+    total = sum(c["amount"] for c in contributions if c["amount"])
+    return {
+        "committee_id": committee_id,
+        "contributions": contributions,
+        "total_shown": total,
+        "count": len(contributions),
+    }
+
+
+def crossref(candidate_name, donor_name):
+    """Cross-reference a candidate with a donor and analyze connections."""
+    # Find candidate
+    cand_result = search_candidates(candidate_name)
+    if "error" in cand_result or not cand_result.get("candidates"):
+        return {"error": f"Candidate '{candidate_name}' not found"}
+
+    # Find donor/committee
+    donor_result = search_donors(donor_name)
+    if "error" in donor_result or not donor_result.get("committees"):
+        return {"error": f"Donor '{donor_name}' not found"}
+
+    candidate = cand_result["candidates"][0]
+    donor = donor_result["committees"][0]
+
+    # Get AI analysis
+    analysis = ask_gatekeeper(f"""Analyze the potential financial relationship between:
+
+Candidate: {candidate['name']} ({candidate['party']}, {candidate['office']}, {candidate['state']})
+Committee/PAC: {donor['name']} (Type: {donor['type']}, Total Receipts: ${donor.get('total_receipts', 'unknown')})
+
+Based on publicly available information:
+1. What is the likely nature of their financial connection?
+2. Are there potential conflicts of interest?
+3. What legislative areas might be influenced?
+4. What additional data points should we investigate?""")
+
+    return {
+        "candidate": candidate,
+        "donor": donor,
+        "ai_analysis": analysis,
+    }
+
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "candidate")
+
+    if action == "candidate":
+        result = search_candidates(input_data.get("name", ""))
+    elif action == "donor":
+        result = search_donors(input_data.get("name", ""))
+    elif action == "contributions":
+        result = get_contributions(
+            input_data.get("committee_id", ""),
+            input_data.get("min_amount", 0),
+        )
+    elif action == "crossref":
+        result = crossref(
+            input_data.get("candidate", ""),
+            input_data.get("donor", ""),
+        )
+    else:
+        result = {"error": f"Unknown action: {action}"}
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

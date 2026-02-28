@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""
+fire-ask - CLI client for the Cleansing Fire Gatekeeper
+
+Submit prompts to local Ollama via the gatekeeper daemon.
+
+Usage:
+  fire-ask "Summarize this document"
+  fire-ask --sync "What are the key themes in this text?"
+  fire-ask --model qwen3:8b "Quick classification task"
+  echo "some text" | fire-ask --sync --system "You are a classifier" "Classify this"
+  fire-ask --status
+  fire-ask --task <task-id>
+"""
+
+import argparse
+import json
+import sys
+import time
+import urllib.error
+import urllib.request
+
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+
+def api_call(method, path, data=None, timeout=310):
+    url = f"{GATEKEEPER_URL}{path}"
+    body = json.dumps(data).encode("utf-8") if data else None
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Content-Type": "application/json"} if body else {},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        result = json.loads(e.read().decode("utf-8"))
+        print(f"Error ({e.code}): {result.get('error', result)}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"Cannot reach gatekeeper at {GATEKEEPER_URL}: {e.reason}", file=sys.stderr)
+        print("Is the daemon running? Start with: python3 daemon/gatekeeper.py", file=sys.stderr)
+        sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Cleansing Fire - Ask the Gatekeeper")
+    parser.add_argument("prompt", nargs="?", help="The prompt to send")
+    parser.add_argument("--sync", action="store_true", help="Wait for result (default: async)")
+    parser.add_argument("--system", type=str, default="", help="System prompt")
+    parser.add_argument("--model", type=str, default="", help="Override model")
+    parser.add_argument("--caller", type=str, default="cli", help="Caller identifier")
+    parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--max-tokens", type=int, default=4096)
+    parser.add_argument("--timeout", type=int, default=300, help="Sync timeout in seconds")
+    parser.add_argument("--status", action="store_true", help="Show gatekeeper status")
+    parser.add_argument("--task", type=str, help="Check task status by ID")
+    parser.add_argument("--poll", type=str, help="Poll task until complete, print result")
+    parser.add_argument("--json", action="store_true", help="Output raw JSON")
+    args = parser.parse_args()
+
+    if args.status:
+        result = api_call("GET", "/health")
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"Queue: {result['queue_depth']}/{result['queue_capacity']}")
+            print(f"Model: {result['default_model']}")
+            print(f"Running: {'yes' if result['running'] else 'no'}")
+            print(f"Current: {result.get('current_task', 'none') or 'idle'}")
+            print(f"Stats: {result['total_completed']} done, {result['total_failed']} failed, {result['total_rejected']} rejected")
+        return
+
+    if args.task:
+        result = api_call("GET", f"/task/{args.task}")
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"Status: {result['status']}")
+            if result.get('result'):
+                print(f"\n{result['result']}")
+            if result.get('error'):
+                print(f"Error: {result['error']}", file=sys.stderr)
+            if result.get('duration'):
+                print(f"\n[{result['duration']}s]", file=sys.stderr)
+        return
+
+    if args.poll:
+        while True:
+            result = api_call("GET", f"/task/{args.poll}")
+            if result["status"] in ("completed", "failed"):
+                if result.get("result"):
+                    print(result["result"])
+                if result.get("error"):
+                    print(f"Error: {result['error']}", file=sys.stderr)
+                    sys.exit(1)
+                return
+            time.sleep(0.5)
+
+    # Build prompt - append stdin if available
+    prompt = args.prompt or ""
+    if not sys.stdin.isatty():
+        stdin_text = sys.stdin.read().strip()
+        if stdin_text:
+            prompt = f"{prompt}\n\n{stdin_text}" if prompt else stdin_text
+
+    if not prompt:
+        parser.print_help()
+        sys.exit(1)
+
+    payload = {
+        "prompt": prompt,
+        "system": args.system,
+        "model": args.model,
+        "caller": args.caller,
+        "temperature": args.temperature,
+        "max_tokens": args.max_tokens,
+    }
+
+    if args.sync:
+        payload["timeout"] = args.timeout
+        result = api_call("POST", "/submit-sync", payload, timeout=args.timeout + 10)
+        if result.get("status") == "completed":
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(result.get("result", ""))
+        else:
+            print(f"Failed: {result.get('error', 'unknown')}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        result = api_call("POST", "/submit", payload)
+        task_id = result.get("id", "unknown")
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"Task submitted: {task_id}")
+            print(f"Check status: fire-ask --task {task_id}")
+            print(f"Wait for result: fire-ask --poll {task_id}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cleansingfire.gatekeeper</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>daemon/gatekeeper.py</string>
+        <string>--port</string>
+        <string>7800</string>
+        <string>--queue-size</string>
+        <string>5</string>
+        <string>--model</string>
+        <string>mistral-large:123b</string>
+        <string>--pid-file</string>
+        <string>/tmp/cleansing-fire-gatekeeper.pid</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/bedwards/vibe/cleansing-fire</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/cleansing-fire-gatekeeper.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/cleansing-fire-gatekeeper.stderr.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    </dict>
+</dict>
+</plist>

@@ -1,0 +1,15 @@
+Cleansing Fire Plugin Directory
+
+Plugins are executable scripts that:
+1. Accept JSON input on stdin
+2. Produce JSON output on stdout
+3. Return exit code 0 on success, non-zero on failure
+4. Have access to CF_PROJECT_DIR environment variable
+
+Plugin naming convention: <category>-<name>
+  e.g., civic-foia-generator, osint-corporate-lookup, media-fediverse-post
+
+Plugins can call the Gatekeeper for LLM tasks:
+  curl -s -X POST http://127.0.0.1:7800/submit-sync \
+    -H 'Content-Type: application/json' \
+    -d '{"prompt": "...", "caller": "plugin:<name>"}'

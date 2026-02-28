@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Corruption Cross-Referencer
+
+The integration layer. Cross-references:
+- Campaign donations (FEC)
+- Government contracts (USAspending)
+- Legislative votes (Congress.gov/LegiScan)
+- Lobbying data
+
+Flags correlations: "Company X donated $50K to Senator Y, who voted for
+a bill that awarded Company X a $10M contract, facilitated by Lobbyist Z
+who previously worked in Senator Y's office."
+
+Input JSON:
+  {"action": "investigate", "entity": "Palantir"}
+  {"action": "follow_money", "candidate": "Ted Cruz"}
+  {"action": "contract_donors", "keyword": "border surveillance"}
+
+Output JSON: structured analysis with AI-generated narrative
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+PROJECT_DIR = os.environ.get("CF_PROJECT_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PLUGINS_DIR = os.path.join(PROJECT_DIR, "plugins")
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+
+def call_plugin(name, input_data):
+    """Call another plugin and return its output."""
+    plugin_path = os.path.join(PLUGINS_DIR, name)
+    try:
+        result = subprocess.run(
+            [plugin_path],
+            input=json.dumps(input_data),
+            capture_output=True, text=True, timeout=120,
+            env={**os.environ, "CF_PROJECT_DIR": PROJECT_DIR},
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        return {"error": result.stderr or "Plugin failed"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ask_gatekeeper(prompt):
+    """Submit analysis to gatekeeper LLM."""
+    import urllib.request
+    payload = {
+        "prompt": prompt,
+        "system": """You are an investigative journalist AI. Your job is to find and articulate
+connections between money, power, and policy. Be specific. Name names. Follow the money.
+Flag conflicts of interest. Use the principle of Pyrrhic Lucidity: make hidden mechanisms visible.""",
+        "caller": "plugin:civic-crossref",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 180,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=190) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return f"[Analysis unavailable: {body.get('error', 'unknown')}]"
+    except Exception as e:
+        return f"[Gatekeeper unavailable: {e}]"
+
+
+def investigate_entity(entity_name):
+    """Full investigation of an entity: who do they donate to, what contracts do they get?"""
+
+    # Get their federal contracts
+    spending = call_plugin("civic-spending", {
+        "action": "recipient",
+        "name": entity_name,
+    })
+
+    # Search for their PAC/committee
+    donations = call_plugin("civic-fec", {
+        "action": "donor",
+        "name": entity_name,
+    })
+
+    # Search for related legislation
+    legislation = call_plugin("civic-legiscan", {
+        "action": "search",
+        "query": entity_name,
+    })
+
+    # Build the cross-reference narrative
+    contracts_summary = ""
+    if spending.get("awards"):
+        top = spending["awards"][:5]
+        contracts_summary = f"Total federal awards (top 20): ${spending.get('total_amount', 0):,.0f}\n"
+        contracts_summary += "\n".join(
+            f"- ${a['amount']:,.0f} from {a['agency']}: {a['description']}"
+            for a in top
+        )
+
+    donations_summary = ""
+    if donations.get("committees"):
+        donations_summary = "\n".join(
+            f"- {c['name']} ({c['type']}): ${c.get('total_receipts', 0):,.0f} raised"
+            for c in donations["committees"][:5]
+        )
+
+    legislation_summary = ""
+    if legislation.get("bills"):
+        legislation_summary = "\n".join(
+            f"- {b['number']} ({b['state']}): {b['title']}"
+            for b in legislation["bills"][:5]
+        )
+
+    # AI cross-reference analysis
+    analysis = ask_gatekeeper(f"""INVESTIGATION: {entity_name}
+
+FEDERAL CONTRACTS:
+{contracts_summary or "No contracts found"}
+
+POLITICAL DONATIONS / PACs:
+{donations_summary or "No PACs/committees found"}
+
+RELATED LEGISLATION:
+{legislation_summary or "No directly related legislation found"}
+
+CROSS-REFERENCE ANALYSIS:
+1. Map the money flow: Who pays this entity (government contracts)? Who does this entity pay (political donations)?
+2. Identify the feedback loop: Do the politicians receiving donations from this entity vote for legislation or contracts that benefit this entity?
+3. Flag specific conflicts of interest
+4. Identify the revolving door: Are there former government officials now at this entity, or former entity employees now in government?
+5. Rate the corruption risk on a scale of 1-10 and explain
+6. Recommend specific FOIA requests or further investigation paths""")
+
+    return {
+        "entity": entity_name,
+        "contracts": spending,
+        "political_activity": donations,
+        "legislation": legislation,
+        "cross_reference_analysis": analysis,
+    }
+
+
+def follow_money(candidate_name):
+    """Follow the money for a specific candidate."""
+
+    # Find candidate
+    candidates = call_plugin("civic-fec", {
+        "action": "candidate",
+        "name": candidate_name,
+    })
+
+    if not candidates.get("candidates"):
+        return {"error": f"Candidate '{candidate_name}' not found"}
+
+    candidate = candidates["candidates"][0]
+    committees = candidate.get("principal_committees", [])
+
+    # Get contributions to their committee
+    contributions = {}
+    for comm in committees[:2]:
+        contrib = call_plugin("civic-fec", {
+            "action": "contributions",
+            "committee_id": comm["id"],
+            "min_amount": 1000,
+        })
+        contributions[comm["id"]] = contrib
+
+    # Cross-reference top donors with government contracts
+    top_employers = set()
+    for comm_id, contrib in contributions.items():
+        for c in contrib.get("contributions", []):
+            emp = c.get("employer")
+            if emp and emp not in ("SELF-EMPLOYED", "RETIRED", "NOT EMPLOYED", "NONE", "N/A"):
+                top_employers.add(emp)
+
+    employer_contracts = {}
+    for employer in list(top_employers)[:5]:  # check top 5 employers
+        spending = call_plugin("civic-spending", {
+            "action": "recipient",
+            "name": employer,
+        })
+        if spending.get("awards"):
+            employer_contracts[employer] = spending
+
+    # AI analysis
+    contrib_text = ""
+    for comm_id, contrib in contributions.items():
+        for c in contrib.get("contributions", [])[:10]:
+            contrib_text += f"- ${c.get('amount', 0):,.0f} from {c.get('contributor')} ({c.get('employer', 'N/A')})\n"
+
+    contracts_text = ""
+    for employer, spending in employer_contracts.items():
+        total = spending.get("total_amount", 0)
+        contracts_text += f"\n{employer}: ${total:,.0f} in federal contracts\n"
+        for a in spending.get("awards", [])[:3]:
+            contracts_text += f"  - ${a['amount']:,.0f} from {a['agency']}: {a['description']}\n"
+
+    analysis = ask_gatekeeper(f"""FOLLOW THE MONEY: {candidate['name']}
+Party: {candidate['party']}
+Office: {candidate['office']}, {candidate['state']}
+
+TOP CONTRIBUTIONS:
+{contrib_text or "No large contributions found"}
+
+DONORS' FEDERAL CONTRACTS:
+{contracts_text or "No matching contracts found"}
+
+ANALYSIS:
+1. Who are the biggest financial backers?
+2. Do those backers receive federal contracts or benefits?
+3. Map the money loop: donor -> candidate -> policy -> contracts -> donor
+4. What industries are most heavily represented?
+5. Rate the conflict-of-interest risk 1-10
+6. What FOIA requests would reveal more?""")
+
+    return {
+        "candidate": candidate,
+        "contributions": contributions,
+        "donor_contracts": employer_contracts,
+        "analysis": analysis,
+    }
+
+
+def contract_donors(keyword):
+    """Find who gets contracts for X and who they donate to."""
+
+    # Find contracts
+    spending = call_plugin("civic-spending", {
+        "action": "search",
+        "keyword": keyword,
+    })
+
+    if not spending.get("awards"):
+        return {"error": f"No contracts found for '{keyword}'"}
+
+    # Get unique recipients
+    recipients = set()
+    for a in spending["awards"]:
+        r = a.get("recipient")
+        if r:
+            recipients.add(r)
+
+    # Check political donations from each recipient
+    recipient_politics = {}
+    for recipient in list(recipients)[:5]:
+        politics = call_plugin("civic-fec", {
+            "action": "donor",
+            "name": recipient,
+        })
+        if politics.get("committees"):
+            recipient_politics[recipient] = politics
+
+    # AI analysis
+    analysis = ask_gatekeeper(f"""CONTRACT-DONOR ANALYSIS for "{keyword}"
+
+FEDERAL CONTRACTS:
+Total: ${spending.get('total_amount', 0):,.0f}
+Top recipients:
+{chr(10).join(f"- {a['recipient']}: ${a['amount']:,.0f} from {a['agency']}" for a in spending['awards'][:10])}
+
+POLITICAL ACTIVITY OF RECIPIENTS:
+{chr(10).join(f"{r}: {json.dumps([c['name'] for c in p.get('committees', [])[:3]])}" for r, p in recipient_politics.items()) or "No political activity found"}
+
+QUESTIONS:
+1. Is there a pattern of companies that get these contracts also making political donations?
+2. Which agencies are awarding these contracts?
+3. Are there signs of regulatory capture?
+4. What would a deeper investigation look like?""")
+
+    return {
+        "keyword": keyword,
+        "contracts": spending,
+        "recipient_political_activity": recipient_politics,
+        "analysis": analysis,
+    }
+
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "investigate")
+
+    if action == "investigate":
+        result = investigate_entity(input_data.get("entity", ""))
+    elif action == "follow_money":
+        result = follow_money(input_data.get("candidate", ""))
+    elif action == "contract_donors":
+        result = contract_donors(input_data.get("keyword", ""))
+    else:
+        result = {"error": f"Unknown action: {action}"}
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

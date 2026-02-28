@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: The Forge (Vision Generator)
+
+Fuses civic data with visual art. Takes corruption data, legislative
+analysis, or raw ideas and generates SVG visualizations, ASCII art,
+Mermaid diagrams, and image generation prompts.
+
+The metaphor is the forge: raw data goes in, visual weapons come out.
+
+Input JSON:
+  {"action": "money_flow", "data": {...}}       -> SVG Sankey diagram of money flows
+  {"action": "power_network", "data": {...}}    -> Network graph of power connections
+  {"action": "timeline", "events": [...]}       -> SVG timeline
+  {"action": "ascii_fire", "text": "..."}       -> ASCII art with fire aesthetic
+  {"action": "corruption_meter", "score": 7.5}  -> Visual corruption gauge
+  {"action": "prompt", "concept": "..."}        -> Image generation prompt for SD/FLUX
+  {"action": "mermaid", "description": "..."}   -> Mermaid.js diagram via LLM
+
+Output: SVG string, ASCII art, or structured data
+"""
+
+import json
+import math
+import os
+import sys
+import urllib.request
+
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+
+def ask_gatekeeper(prompt, system="", temperature=0.7):
+    payload = {
+        "prompt": prompt,
+        "system": system,
+        "caller": "plugin:forge-vision",
+        "temperature": temperature,
+        "max_tokens": 2048,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+    except Exception:
+        pass
+    return None
+
+
+# -----------------------------------------------------------------------
+# SVG Generators
+# -----------------------------------------------------------------------
+
+def svg_header(width=800, height=600):
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}"
+  style="background:#0a0a0a; font-family:'Courier New',monospace;">
+  <defs>
+    <linearGradient id="fire" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#ff4400"/>
+      <stop offset="50%" stop-color="#ff8800"/>
+      <stop offset="100%" stop-color="#ffcc00"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+'''
+
+def svg_footer():
+    return '</svg>'
+
+
+def money_flow_svg(data):
+    """Generate an SVG Sankey-style diagram of money flows.
+    data: {"flows": [{"from": "Corp A", "to": "Senator B", "amount": 50000}, ...]}
+    """
+    flows = data.get("flows", [])
+    if not flows:
+        return {"error": "No flows provided"}
+
+    # Collect unique nodes
+    sources = list(dict.fromkeys(f["from"] for f in flows))
+    targets = list(dict.fromkeys(f["to"] for f in flows))
+    max_amount = max(f["amount"] for f in flows) if flows else 1
+
+    width, height = 900, max(400, len(flows) * 50 + 100)
+    svg = svg_header(width, height)
+
+    # Title
+    svg += f'  <text x="{width//2}" y="30" fill="#ffcc00" font-size="16" text-anchor="middle" filter="url(#glow)">FOLLOW THE MONEY</text>\n'
+
+    # Draw source nodes (left)
+    src_y = {}
+    for i, src in enumerate(sources):
+        y = 70 + i * (height - 100) / max(len(sources), 1)
+        src_y[src] = y
+        svg += f'  <text x="10" y="{y}" fill="#ff8800" font-size="11" dominant-baseline="middle">{src[:25]}</text>\n'
+
+    # Draw target nodes (right)
+    tgt_y = {}
+    for i, tgt in enumerate(targets):
+        y = 70 + i * (height - 100) / max(len(targets), 1)
+        tgt_y[tgt] = y
+        svg += f'  <text x="{width-10}" y="{y}" fill="#ff4400" font-size="11" text-anchor="end" dominant-baseline="middle">{tgt[:25]}</text>\n'
+
+    # Draw flow lines
+    for flow in flows:
+        sy = src_y.get(flow["from"], 100)
+        ty = tgt_y.get(flow["to"], 100)
+        thickness = max(1, (flow["amount"] / max_amount) * 20)
+        opacity = 0.3 + 0.7 * (flow["amount"] / max_amount)
+        amount_str = f"${flow['amount']:,.0f}"
+
+        mid_x = width // 2
+        svg += f'  <path d="M 200 {sy} C {mid_x} {sy}, {mid_x} {ty}, {width-200} {ty}" '
+        svg += f'fill="none" stroke="url(#fire)" stroke-width="{thickness:.1f}" opacity="{opacity:.2f}"/>\n'
+        svg += f'  <text x="{mid_x}" y="{(sy+ty)/2 - 5}" fill="#666" font-size="9" text-anchor="middle">{amount_str}</text>\n'
+
+    svg += svg_footer()
+    return {"svg": svg, "type": "money_flow"}
+
+
+def corruption_meter_svg(score):
+    """Generate a visual corruption gauge. Score 0-10."""
+    score = max(0, min(10, float(score)))
+    width, height = 400, 250
+
+    svg = svg_header(width, height)
+    cx, cy, r = 200, 180, 140
+
+    # Arc background
+    for i in range(100):
+        angle = math.pi + (math.pi * i / 100)
+        x = cx + r * math.cos(angle)
+        y = cy + r * math.sin(angle)
+        # Color gradient from green to red
+        t = i / 100
+        if t < 0.3:
+            color = f"rgb({int(t/0.3*255)}, 200, 50)"
+        elif t < 0.7:
+            color = f"rgb(255, {int((0.7-t)/0.4*200)}, 0)"
+        else:
+            color = f"rgb({int(255-(t-0.7)/0.3*100)}, 0, 0)"
+        svg += f'  <circle cx="{x:.0f}" cy="{y:.0f}" r="3" fill="{color}" opacity="0.6"/>\n'
+
+    # Needle
+    angle = math.pi + (math.pi * score / 10)
+    nx = cx + (r - 20) * math.cos(angle)
+    ny = cy + (r - 20) * math.sin(angle)
+    svg += f'  <line x1="{cx}" y1="{cy}" x2="{nx:.0f}" y2="{ny:.0f}" stroke="#ffcc00" stroke-width="3" filter="url(#glow)"/>\n'
+    svg += f'  <circle cx="{cx}" cy="{cy}" r="6" fill="#ff4400"/>\n'
+
+    # Score text
+    svg += f'  <text x="{cx}" y="{cy + 40}" fill="#ffcc00" font-size="28" text-anchor="middle" filter="url(#glow)">{score:.1f}</text>\n'
+    svg += f'  <text x="{cx}" y="{cy + 60}" fill="#888" font-size="12" text-anchor="middle">CORRUPTION INDEX</text>\n'
+
+    # Labels
+    svg += f'  <text x="50" y="{cy+10}" fill="#0f0" font-size="10">CLEAN</text>\n'
+    svg += f'  <text x="{width-80}" y="{cy+10}" fill="#f00" font-size="10">CAPTURED</text>\n'
+
+    svg += svg_footer()
+    return {"svg": svg, "score": score, "type": "corruption_meter"}
+
+
+def timeline_svg(events):
+    """Generate an SVG timeline.
+    events: [{"date": "2024-01-15", "title": "...", "description": "..."}, ...]
+    """
+    if not events:
+        return {"error": "No events provided"}
+
+    width = 900
+    height = max(300, len(events) * 80 + 100)
+    svg = svg_header(width, height)
+
+    svg += f'  <text x="{width//2}" y="30" fill="#ffcc00" font-size="16" text-anchor="middle" filter="url(#glow)">TIMELINE</text>\n'
+
+    # Central line
+    svg += f'  <line x1="{width//2}" y1="50" x2="{width//2}" y2="{height-30}" stroke="#333" stroke-width="2"/>\n'
+
+    for i, event in enumerate(events):
+        y = 80 + i * 70
+        side = "left" if i % 2 == 0 else "right"
+        tx = width // 2 - 30 if side == "left" else width // 2 + 30
+        anchor = "end" if side == "left" else "start"
+
+        # Node on timeline
+        svg += f'  <circle cx="{width//2}" cy="{y}" r="5" fill="url(#fire)" filter="url(#glow)"/>\n'
+
+        # Date
+        svg += f'  <text x="{tx}" y="{y-8}" fill="#ff8800" font-size="10" text-anchor="{anchor}">{event.get("date", "")}</text>\n'
+        # Title
+        svg += f'  <text x="{tx}" y="{y+8}" fill="#eee" font-size="12" text-anchor="{anchor}" font-weight="bold">{event.get("title", "")[:40]}</text>\n'
+        # Description
+        desc = event.get("description", "")[:60]
+        if desc:
+            svg += f'  <text x="{tx}" y="{y+22}" fill="#888" font-size="9" text-anchor="{anchor}">{desc}</text>\n'
+
+    svg += svg_footer()
+    return {"svg": svg, "type": "timeline"}
+
+
+# -----------------------------------------------------------------------
+# ASCII Art
+# -----------------------------------------------------------------------
+
+FIRE_FRAMES = [
+    r"""
+       )
+      ) \
+     / ) (
+     \(_)/
+    """,
+    r"""
+      (  )
+     ( )( )
+    (  ) ( )
+     (  )/
+      \/
+    """,
+]
+
+def ascii_fire_art(text):
+    """Generate ASCII art with fire aesthetic."""
+    lines = text.split('\n') if '\n' in text else [text]
+    width = max(len(l) for l in lines) + 8
+
+    result = []
+    result.append("=" * width)
+    result.append(f"{'':^{width}}")
+
+    # Fire top
+    fire_line = "  ".join(["🔥"] * (width // 4))
+    result.append(f"{fire_line:^{width}}")
+    result.append(f"{'':^{width}}")
+
+    for line in lines:
+        result.append(f"  | {line:^{width-6}} |  ")
+
+    result.append(f"{'':^{width}}")
+    result.append(f"{fire_line:^{width}}")
+    result.append("=" * width)
+    result.append("")
+    result.append("  P Y R R H I C   L U C I D I T Y")
+    result.append("  See clearly. Act anyway. Bear the cost.")
+    result.append("")
+
+    return {"ascii": "\n".join(result), "type": "ascii_fire"}
+
+
+# -----------------------------------------------------------------------
+# Mermaid Diagrams via LLM
+# -----------------------------------------------------------------------
+
+def generate_mermaid(description):
+    """Use LLM to generate a Mermaid.js diagram from description."""
+    result = ask_gatekeeper(
+        f"Generate a Mermaid.js diagram for: {description}\n\nOutput ONLY valid Mermaid syntax, nothing else. Use meaningful labels. Use the graph TD or flowchart TD format.",
+        system="You are a diagram generator. Output only valid Mermaid.js syntax. No markdown fences, no explanation.",
+        temperature=0.3,
+    )
+    if result:
+        # Clean up - remove markdown fences if present
+        result = result.strip()
+        if result.startswith("```"):
+            result = "\n".join(result.split("\n")[1:])
+        if result.endswith("```"):
+            result = "\n".join(result.split("\n")[:-1])
+        return {"mermaid": result.strip(), "type": "mermaid"}
+    return {"error": "LLM unavailable"}
+
+
+# -----------------------------------------------------------------------
+# Image Generation Prompts
+# -----------------------------------------------------------------------
+
+def generate_image_prompt(concept):
+    """Generate a detailed Stable Diffusion / FLUX prompt from a concept."""
+    result = ask_gatekeeper(
+        f"""Create a detailed image generation prompt for Stable Diffusion/FLUX based on this concept: {concept}
+
+The visual style should be:
+- Dark background with fire/ember accents (the Cleansing Fire aesthetic)
+- Mix of photorealistic and symbolic elements
+- Powerful, striking, suitable for a political movement
+- NOT generic stock photo style - more like revolutionary art, propaganda posters, or photojournalism
+
+Output ONLY the prompt, formatted as: [main subject], [style details], [lighting], [mood], [technical specs]""",
+        system="You are a visual art director. Create vivid, specific image generation prompts.",
+        temperature=0.8,
+    )
+    if result:
+        return {"prompt": result.strip(), "concept": concept, "type": "image_prompt"}
+    return {"error": "LLM unavailable"}
+
+
+# -----------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "ascii_fire")
+
+    if action == "money_flow":
+        result = money_flow_svg(input_data.get("data", {}))
+    elif action == "corruption_meter":
+        result = corruption_meter_svg(input_data.get("score", 5))
+    elif action == "timeline":
+        result = timeline_svg(input_data.get("events", []))
+    elif action == "ascii_fire":
+        result = ascii_fire_art(input_data.get("text", "CLEANSING FIRE"))
+    elif action == "mermaid":
+        result = generate_mermaid(input_data.get("description", ""))
+    elif action == "prompt":
+        result = generate_image_prompt(input_data.get("concept", ""))
+    else:
+        result = {"error": f"Unknown action: {action}"}
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

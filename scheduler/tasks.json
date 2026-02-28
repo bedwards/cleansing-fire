@@ -1,0 +1,92 @@
+{
+  "scheduled_tasks": [
+    {
+      "name": "health-check",
+      "schedule": "*/5 * * * *",
+      "type": "shell",
+      "command": "curl -sf http://127.0.0.1:7800/health > /dev/null && echo ok || echo gatekeeper-down",
+      "enabled": true
+    },
+    {
+      "name": "git-status-report",
+      "schedule": "0 */6 * * *",
+      "type": "shell",
+      "command": "git status --porcelain && git log --oneline -5",
+      "enabled": true
+    },
+    {
+      "name": "legislative-scan-privacy",
+      "schedule": "0 8 * * 1",
+      "type": "plugin",
+      "plugin": "civic-legiscan",
+      "input": {
+        "action": "monitor",
+        "keywords": ["surveillance", "encryption", "privacy", "facial recognition", "data collection"]
+      },
+      "enabled": false,
+      "note": "Enable after setting LEGISCAN_API_KEY"
+    },
+    {
+      "name": "legislative-scan-antitrust",
+      "schedule": "0 8 * * 2",
+      "type": "plugin",
+      "plugin": "civic-legiscan",
+      "input": {
+        "action": "monitor",
+        "keywords": ["antitrust", "monopoly", "merger", "competition", "market concentration"]
+      },
+      "enabled": false,
+      "note": "Enable after setting LEGISCAN_API_KEY"
+    },
+    {
+      "name": "legislative-scan-transparency",
+      "schedule": "0 8 * * 3",
+      "type": "plugin",
+      "plugin": "civic-legiscan",
+      "input": {
+        "action": "monitor",
+        "keywords": ["FOIA", "transparency", "whistleblower", "public records", "disclosure"]
+      },
+      "enabled": false,
+      "note": "Enable after setting LEGISCAN_API_KEY"
+    },
+    {
+      "name": "spending-watchdog-defense",
+      "schedule": "0 9 * * 4",
+      "type": "plugin",
+      "plugin": "civic-spending",
+      "input": {
+        "action": "search",
+        "keyword": "surveillance technology",
+        "fiscal_year": 2025
+      },
+      "enabled": true
+    },
+    {
+      "name": "spending-watchdog-consulting",
+      "schedule": "0 9 * * 5",
+      "type": "plugin",
+      "plugin": "civic-spending",
+      "input": {
+        "action": "search",
+        "keyword": "consulting services",
+        "fiscal_year": 2025
+      },
+      "enabled": true
+    }
+  ],
+  "event_tasks": [
+    {
+      "name": "docs-changed",
+      "source_type": "file_watcher",
+      "source_config": {
+        "pattern": "docs/*.md"
+      },
+      "type": "gatekeeper",
+      "prompt": "A documentation file in the Cleansing Fire project has been updated. Generate a brief changelog entry summarizing what might have changed.",
+      "sync": true,
+      "enabled": false,
+      "note": "Enable for doc change monitoring"
+    }
+  ]
+}

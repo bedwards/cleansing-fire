@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Legislative Monitor (LegiScan)
+
+Monitors legislation across all 50 states + Congress.
+Uses LegiScan API to fetch bills, then uses the Gatekeeper LLM
+to summarize, classify, and score them.
+
+Input JSON:
+  {"action": "search", "query": "surveillance", "state": "US"}
+  {"action": "bill", "bill_id": 12345}
+  {"action": "monitor", "keywords": ["surveillance", "encryption", "privacy"]}
+
+Output JSON:
+  {"bills": [...], "summaries": [...]}
+
+Requires LEGISCAN_API_KEY environment variable (free tier available at legiscan.com)
+"""
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+import urllib.parse
+
+LEGISCAN_BASE = "https://api.legiscan.com/"
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+
+def legiscan_api(operation, **params):
+    """Call LegiScan API."""
+    api_key = os.environ.get("LEGISCAN_API_KEY", "")
+    if not api_key:
+        return {"error": "LEGISCAN_API_KEY not set. Get a free key at legiscan.com"}
+
+    params["key"] = api_key
+    params["op"] = operation
+    query = urllib.parse.urlencode(params)
+    url = f"{LEGISCAN_BASE}?{query}"
+
+    try:
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ask_gatekeeper(prompt, system=""):
+    """Submit a prompt to the gatekeeper for LLM analysis."""
+    payload = {
+        "prompt": prompt,
+        "system": system or "You are a legislative analyst. Be concise and factual.",
+        "caller": "plugin:civic-legiscan",
+        "temperature": 0.3,
+        "max_tokens": 1024,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return f"[LLM Error: {body.get('error', 'unknown')}]"
+    except Exception as e:
+        return f"[Gatekeeper unavailable: {e}]"
+
+
+def search_bills(query, state="US"):
+    """Search for bills matching a query."""
+    result = legiscan_api("getSearch", state=state, query=query)
+    if "error" in result:
+        return result
+
+    search_result = result.get("searchresult", {})
+    bills = []
+    for key, bill in search_result.items():
+        if key == "summary" or not isinstance(bill, dict):
+            continue
+        bills.append({
+            "bill_id": bill.get("bill_id"),
+            "number": bill.get("bill_number"),
+            "title": bill.get("title"),
+            "state": bill.get("state"),
+            "status": bill.get("status"),
+            "last_action": bill.get("last_action"),
+            "last_action_date": bill.get("last_action_date"),
+            "url": bill.get("url"),
+        })
+
+    return {"bills": bills, "count": len(bills)}
+
+
+def get_bill_detail(bill_id):
+    """Get detailed bill information and generate AI summary."""
+    result = legiscan_api("getBill", id=bill_id)
+    if "error" in result:
+        return result
+
+    bill = result.get("bill", {})
+    title = bill.get("title", "")
+    description = bill.get("description", "")
+    status_desc = bill.get("status_desc", "")
+    state = bill.get("state", "")
+    bill_number = bill.get("bill_number", "")
+
+    # Get AI analysis
+    prompt = f"""Analyze this legislation:
+
+Bill: {bill_number} ({state})
+Title: {title}
+Description: {description}
+Status: {status_desc}
+
+Provide:
+1. Plain English summary (2-3 sentences)
+2. Who does this affect?
+3. Power analysis: Does this concentrate or distribute power? How?
+4. Civil liberties impact (positive/negative/neutral)
+5. Score from -5 (authoritarian) to +5 (liberating)"""
+
+    analysis = ask_gatekeeper(prompt)
+
+    return {
+        "bill_id": bill_id,
+        "number": bill_number,
+        "state": state,
+        "title": title,
+        "description": description,
+        "status": status_desc,
+        "sponsors": [s.get("name") for s in bill.get("sponsors", [])],
+        "history": bill.get("history", [])[-5:],  # last 5 actions
+        "ai_analysis": analysis,
+    }
+
+
+def monitor_keywords(keywords):
+    """Search for bills matching multiple keywords and return summaries."""
+    all_bills = []
+    for keyword in keywords:
+        result = search_bills(keyword)
+        if "bills" in result:
+            all_bills.extend(result["bills"])
+
+    # Deduplicate by bill_id
+    seen = set()
+    unique = []
+    for bill in all_bills:
+        bid = bill.get("bill_id")
+        if bid and bid not in seen:
+            seen.add(bid)
+            unique.append(bill)
+
+    return {
+        "keywords": keywords,
+        "total_bills": len(unique),
+        "bills": unique[:20],  # limit to 20 for initial response
+    }
+
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "search")
+
+    if action == "search":
+        result = search_bills(
+            input_data.get("query", ""),
+            input_data.get("state", "US"),
+        )
+    elif action == "bill":
+        result = get_bill_detail(input_data.get("bill_id", 0))
+    elif action == "monitor":
+        result = monitor_keywords(input_data.get("keywords", []))
+    else:
+        result = {"error": f"Unknown action: {action}"}
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

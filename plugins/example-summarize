@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""
+Example plugin: Summarize text using the Gatekeeper's LLM.
+
+Input JSON: {"text": "...", "max_words": 100}
+Output JSON: {"summary": "..."}
+"""
+import json
+import sys
+import urllib.request
+
+def main():
+    input_data = json.loads(sys.stdin.read())
+    text = input_data.get("text", "")
+    max_words = input_data.get("max_words", 100)
+
+    if not text:
+        json.dump({"error": "No text provided"}, sys.stdout)
+        sys.exit(1)
+
+    # Call gatekeeper
+    payload = {
+        "prompt": f"Summarize the following text in {max_words} words or fewer:\n\n{text}",
+        "system": "You are a concise summarizer. Output only the summary, nothing else.",
+        "caller": "plugin:example-summarize",
+        "temperature": 0.3,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "http://127.0.0.1:7800/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                json.dump({"summary": body["result"]}, sys.stdout)
+            else:
+                json.dump({"error": body.get("error", "unknown")}, sys.stdout)
+                sys.exit(1)
+    except Exception as e:
+        json.dump({"error": str(e)}, sys.stdout)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

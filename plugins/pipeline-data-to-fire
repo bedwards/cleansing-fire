@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Data-to-Fire Pipeline
+
+The full pipeline: raw civic data -> analysis -> visualization -> narrative -> distribution
+
+This is where it all fuses. One command takes an investigation target and
+produces a complete multimedia package ready for distribution across
+Fediverse, Bluesky, Matrix, newsletters, and human activists.
+
+Input JSON:
+  {"action": "full_investigation", "target": "Palantir"}
+  {"action": "bill_spotlight", "bill_id": 12345}
+  {"action": "weekly_fire", "topics": ["surveillance", "antitrust"]}
+
+Output: Complete content package with all assets
+"""
+
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+PROJECT_DIR = os.environ.get("CF_PROJECT_DIR", str(Path(__file__).resolve().parent.parent))
+PLUGINS_DIR = os.path.join(PROJECT_DIR, "plugins")
+OUTPUT_DIR = os.path.join(PROJECT_DIR, "output")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def call_plugin(name, input_data):
+    """Call another plugin."""
+    plugin_path = os.path.join(PLUGINS_DIR, name)
+    try:
+        result = subprocess.run(
+            [plugin_path],
+            input=json.dumps(input_data),
+            capture_output=True, text=True, timeout=200,
+            env={**os.environ, "CF_PROJECT_DIR": PROJECT_DIR},
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        return {"error": result.stderr or "Plugin failed"}
+    except subprocess.TimeoutExpired:
+        return {"error": "Plugin timeout"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def save_output(name, content, ext="json"):
+    """Save output to the output directory."""
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    filename = f"{timestamp}-{name}.{ext}"
+    filepath = os.path.join(OUTPUT_DIR, filename)
+    if ext == "json":
+        with open(filepath, "w") as f:
+            json.dump(content, f, indent=2)
+    elif ext == "svg":
+        with open(filepath, "w") as f:
+            f.write(content)
+    else:
+        with open(filepath, "w") as f:
+            f.write(str(content))
+    return filepath
+
+
+def full_investigation(target):
+    """Complete investigation pipeline for an entity."""
+    package = {
+        "target": target,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "assets": {},
+    }
+
+    # Phase 1: Data Collection
+    # Cross-reference investigation
+    crossref = call_plugin("civic-crossref", {
+        "action": "investigate",
+        "entity": target,
+    })
+    package["investigation"] = crossref
+
+    # Phase 2: Visualization
+    # Money flow diagram (if we have contract data)
+    contracts = crossref.get("contracts", {})
+    if contracts.get("awards"):
+        flows = []
+        for award in contracts["awards"][:10]:
+            flows.append({
+                "from": award.get("agency", "Federal Agency"),
+                "to": target,
+                "amount": award.get("amount", 0),
+            })
+
+        # Also show political donations flowing out
+        politics = crossref.get("political_activity", {})
+        if politics.get("committees"):
+            for comm in politics["committees"][:5]:
+                receipts = comm.get("total_receipts", 0)
+                if receipts:
+                    flows.append({
+                        "from": target,
+                        "to": comm["name"][:30],
+                        "amount": receipts,
+                    })
+
+        if flows:
+            money_svg = call_plugin("forge-vision", {
+                "action": "money_flow",
+                "data": {"flows": flows},
+            })
+            if money_svg.get("svg"):
+                filepath = save_output(f"{target}-money-flow", money_svg["svg"], "svg")
+                package["assets"]["money_flow_svg"] = filepath
+
+    # Corruption meter
+    # Extract score from AI analysis if available
+    analysis = crossref.get("cross_reference_analysis", "")
+    corruption_svg = call_plugin("forge-vision", {
+        "action": "corruption_meter",
+        "score": 6.5,  # default, ideally parsed from analysis
+    })
+    if corruption_svg.get("svg"):
+        filepath = save_output(f"{target}-corruption-meter", corruption_svg["svg"], "svg")
+        package["assets"]["corruption_meter_svg"] = filepath
+
+    # Phase 3: Narrative Generation
+    # Social media posts
+    for platform in ["mastodon", "bluesky"]:
+        for tone in ["urgent", "sardonic", "analytical"]:
+            post = call_plugin("forge-voice", {
+                "action": "social",
+                "data": {
+                    "target": target,
+                    "total_contracts": contracts.get("total_amount", 0),
+                    "analysis_excerpt": analysis[:300] if analysis else "",
+                },
+                "platform": platform,
+                "tone": tone,
+            })
+            if post.get("content"):
+                key = f"social_{platform}_{tone}"
+                package["assets"][key] = post["content"]
+
+    # Thread for deep dive
+    thread = call_plugin("forge-voice", {
+        "action": "thread",
+        "topic": f"Investigation: {target} - follow the money from taxpayers to political influence",
+        "sources": [
+            f"FEC campaign finance data",
+            f"USAspending.gov federal contract data",
+            f"LegiScan legislative tracking",
+        ],
+        "max_posts": 8,
+    })
+    if thread.get("posts"):
+        package["assets"]["investigation_thread"] = thread["posts"]
+
+    # Poetry (yes, really - data becomes art)
+    poem = call_plugin("forge-voice", {
+        "action": "poeticize",
+        "raw_data": f"Entity: {target}. Received ${contracts.get('total_amount', 0):,.0f} in federal contracts. {analysis[:200] if analysis else ''}",
+        "form": "spoken",
+    })
+    if poem.get("poem"):
+        package["assets"]["spoken_word"] = poem["poem"]
+
+    # Phase 4: Save complete package
+    filepath = save_output(f"{target}-full-investigation", package)
+    package["package_file"] = filepath
+
+    return package
+
+
+def bill_spotlight(bill_id):
+    """Complete content package for a single bill."""
+    package = {
+        "bill_id": bill_id,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "assets": {},
+    }
+
+    # Get bill details with AI analysis
+    bill = call_plugin("civic-legiscan", {
+        "action": "bill",
+        "bill_id": bill_id,
+    })
+    package["bill"] = bill
+
+    if bill.get("error"):
+        return package
+
+    # Timeline of bill history
+    history = bill.get("history", [])
+    if history:
+        events = [
+            {"date": h.get("date", ""), "title": h.get("action", ""), "description": ""}
+            for h in history
+        ]
+        timeline = call_plugin("forge-vision", {
+            "action": "timeline",
+            "events": events,
+        })
+        if timeline.get("svg"):
+            filepath = save_output(f"bill-{bill_id}-timeline", timeline["svg"], "svg")
+            package["assets"]["timeline_svg"] = filepath
+
+    # Social posts
+    for platform in ["mastodon", "bluesky"]:
+        post = call_plugin("forge-voice", {
+            "action": "social",
+            "data": {
+                "bill_number": bill.get("number", ""),
+                "state": bill.get("state", ""),
+                "title": bill.get("title", ""),
+                "ai_analysis": bill.get("ai_analysis", ""),
+            },
+            "platform": platform,
+            "tone": "urgent",
+        })
+        if post.get("content"):
+            package["assets"][f"social_{platform}"] = post["content"]
+
+    # Agitprop
+    agitprop = call_plugin("forge-voice", {
+        "action": "agitprop",
+        "issue": f"Bill {bill.get('number', '')}: {bill.get('title', '')}",
+        "audience": "general",
+    })
+    if agitprop.get("content"):
+        package["assets"]["agitprop"] = agitprop["content"]
+
+    filepath = save_output(f"bill-{bill_id}-spotlight", package)
+    package["package_file"] = filepath
+    return package
+
+
+def weekly_fire(topics):
+    """Generate the weekly fire: digest of all tracked topics."""
+    package = {
+        "topics": topics,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "assets": {},
+    }
+
+    # Scan legislation across all topics
+    all_bills = []
+    for topic in topics:
+        scan = call_plugin("civic-legiscan", {
+            "action": "monitor",
+            "keywords": [topic],
+        })
+        if scan.get("bills"):
+            all_bills.extend(scan["bills"][:5])
+
+    package["bills_found"] = len(all_bills)
+
+    # Generate digest
+    items = [
+        {"title": f"{b.get('number', '')} ({b.get('state', '')}): {b.get('title', '')}"}
+        for b in all_bills[:15]
+    ]
+    digest = call_plugin("forge-voice", {
+        "action": "digest",
+        "items": items,
+        "period": "weekly",
+    })
+    if digest.get("content"):
+        package["assets"]["newsletter"] = digest["content"]
+        filepath = save_output("weekly-fire-newsletter", digest["content"], "md")
+        package["assets"]["newsletter_file"] = filepath
+
+    # Haiku sequence from the week's data
+    haiku = call_plugin("forge-voice", {
+        "action": "poeticize",
+        "raw_data": f"This week in legislation: {len(all_bills)} bills tracked across topics: {', '.join(topics)}. " +
+                    " | ".join(f"{b.get('number','')}: {b.get('title','')[:50]}" for b in all_bills[:5]),
+        "form": "haiku",
+    })
+    if haiku.get("poem"):
+        package["assets"]["weekly_haiku"] = haiku["poem"]
+
+    filepath = save_output("weekly-fire-package", package)
+    package["package_file"] = filepath
+    return package
+
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "full_investigation")
+
+    if action == "full_investigation":
+        result = full_investigation(input_data.get("target", ""))
+    elif action == "bill_spotlight":
+        result = bill_spotlight(input_data.get("bill_id", 0))
+    elif action == "weekly_fire":
+        result = weekly_fire(input_data.get("topics", []))
+    else:
+        result = {"error": f"Unknown action: {action}"}
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
