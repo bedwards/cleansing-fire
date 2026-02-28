@@ -72,7 +72,7 @@ goals:
       Federation allows independent nodes to collaborate without central
       coordination.
     priority: high
-    status: not_started  # federation protocol is still concept phase
+    status: in_progress  # federation protocol implemented, relay deployed, messaging built
     success_criteria:
       - "Federation protocol specification is complete and implemented"
       - "At least 3 independent nodes can discover each other and share data"
@@ -165,10 +165,12 @@ goals:
     status: in_progress
     success_criteria:
       - "forge-vision generates readable SVG visualizations from data"
-      - "forge-voice generates platform-appropriate content for Mastodon, Bluesky, Matrix"
+      - "forge-voice generates platform-appropriate content for Mastodon, Bluesky"
+      - "forge-satire generates satirical content (doublespeak translator, memes, parody, headlines, roasts)"
+      - "social-bluesky and social-mastodon plugins distribute content to decentralized platforms"
       - "Content is factual, sourced, and compelling"
       - "Distribution reaches at least 3 different decentralized platforms"
-    components: [plugin-forge-vision, plugin-forge-voice]
+    components: [plugin-forge-vision, plugin-forge-voice, plugin-forge-satire, plugin-social-bluesky, plugin-social-mastodon]
     depends_on: [G1.3]
     parent: G1
 
@@ -251,21 +253,24 @@ goals:
 # ---------------------------------------------------------------------------
 
   - id: G3.1
-    name: "Federation protocol design"
+    name: "Federation protocol design and implementation"
     description: >
-      Design the protocol by which independent Cleansing Fire nodes
+      Design and implement the protocol by which independent Cleansing Fire nodes
       discover each other, share data, coordinate investigations,
-      and distribute content.
-    priority: medium
-    status: not_started
+      and distribute content. The FireWire protocol.
+    priority: high
+    status: in_progress  # protocol designed, daemon implemented, relay deployed
     success_criteria:
-      - "Protocol specification document exists in specs/"
-      - "Node discovery mechanism is defined"
-      - "Data sharing format is defined"
-      - "Security model addresses malicious nodes"
+      - "Protocol specification document exists (docs/federation-protocol.md, 1829 lines)"
+      - "Node discovery mechanism implemented (fire-relay Cloudflare Worker + local gossip)"
+      - "Data sharing format defined (JSON envelopes with Ed25519 signatures)"
+      - "Security model addresses malicious nodes (adversarial-resilience.md)"
       - "Protocol works over standard HTTP/HTTPS"
-    components: [federation-protocol]
-    depends_on: [G1.5]  # need a working local system first
+      - "FireWire daemon implemented (daemon/firewire.py, 1124 lines)"
+      - "Encrypted messaging CLI implemented (bin/fire-message, 823 lines)"
+      - "Bootstrap relay deployed (edge/fire-relay)"
+    components: [federation-protocol, firewire-daemon, fire-relay, fire-message]
+    depends_on: [G1.5]
     parent: G3
 
   - id: G3.2
@@ -290,8 +295,8 @@ goals:
       Enable Cleansing Fire agents to communicate with agents from
       other projects and organizations using the A2A protocol.
       Collaborative cross-organizational investigations.
-    priority: low
-    status: not_started
+    priority: medium
+    status: in_progress  # fire-message CLI provides encrypted inter-node messaging
     success_criteria:
       - "A2A agent interface is implemented"
       - "Capability advertisement works correctly"
@@ -328,7 +333,7 @@ goals:
       Complete audit trail of all agent actions. Any human should be
       able to trace what happened, why, and who (which agent) did it.
     priority: high
-    status: not_started
+    status: in_progress  # D1 logging in fire-relay, append-only log in FireWire, scheduler results logging
     success_criteria:
       - "All agent actions are logged with timestamps and agent identifiers"
       - "Git history preserves agent identity in commit metadata"
@@ -338,6 +343,43 @@ goals:
     components: [gatekeeper-daemon, scheduler, worker-orchestrator]
     depends_on: [G2.1]
     parent: G4
+
+  - id: G5
+    name: "Civic legal action infrastructure"
+    description: >
+      Automated generation of legal documents that empower citizens
+      to take concrete civic action: FOIA requests, regulatory complaints,
+      know-your-rights cards, public comments on proposed regulations.
+    priority: high
+    status: in_progress
+    success_criteria:
+      - "legal-automation plugin generates properly formatted FOIA requests"
+      - "Regulatory complaints target correct agencies with proper legal framing"
+      - "Know-your-rights cards are accurate and state-specific"
+      - "Public comment generation follows agency submission requirements"
+      - "All outputs include proper legal disclaimers"
+    components: [plugin-legal-automation]
+    depends_on: [G1.2]
+    subgoals: []
+
+  - id: G6
+    name: "Network resilience and anti-fragility"
+    description: >
+      The network must not just survive attacks but become stronger from them.
+      Adversarial testing, incident response, censorship circumvention,
+      partition recovery. A system that cannot survive its creators cannot
+      survive its enemies.
+    priority: high
+    status: in_progress
+    success_criteria:
+      - "Adversarial resilience framework documented (adversarial-resilience.md)"
+      - "Red team simulation playbook exists with concrete test scripts"
+      - "Network resilience research covers real-world case studies"
+      - "Incident response protocol is defined and tested"
+      - "Node can recover from key compromise, partition, and DoS"
+    components: [adversarial-resilience, adversarial-simulation, network-resilience]
+    depends_on: [G3.1]
+    subgoals: []
 
 # ---------------------------------------------------------------------------
 # Priority Matrix
