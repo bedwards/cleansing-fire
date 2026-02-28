@@ -1,0 +1,872 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Social Media OSINT
+
+Open-source intelligence collection from public social media accounts
+and web presence. Uses ONLY public APIs and publicly accessible data.
+No scraping of private content. No authentication bypass. No TOS violations
+beyond what journalistic investigation permits.
+
+Why this matters:
+  Coordinated influence operations, astroturfing campaigns, and corporate
+  PR offensives leave fingerprints in public social data. Posting patterns,
+  follower networks, account creation dates, and coordinated behavior reveal
+  the machinery behind manufactured consensus. This plugin maps those
+  patterns to expose who is really behind the message.
+
+Data sources (all public, no auth required for basic access):
+  - Reddit public API (posts, comments, subreddit patterns)
+  - Mastodon/Fediverse public API (posts, boosts, instance data)
+  - Wikipedia edit history (anonymous corporate editing detection)
+  - GitHub public API (corporate open-source presence)
+  - Web archive (Wayback Machine) for historical snapshots
+  - DNS/WHOIS for domain ownership patterns
+
+Plugin manifest:
+  name: osint-social
+  category: osint
+  actions: [reddit_user, reddit_subreddit, mastodon_user, mastodon_search,
+            wikipedia_edits, github_org, web_archive, domain_info,
+            coordinated_detection]
+  requires_env: []
+  uses_gatekeeper: true
+
+Input JSON:
+  {"action": "reddit_user", "username": "some_account"}
+  {"action": "reddit_subreddit", "subreddit": "technology", "query": "lobbying"}
+  {"action": "mastodon_user", "handle": "@user@mastodon.social"}
+  {"action": "mastodon_search", "instance": "mastodon.social", "query": "corporate power"}
+  {"action": "wikipedia_edits", "ip_range": "198.35.26.0/24", "page": ""}
+  {"action": "github_org", "org": "google"}
+  {"action": "web_archive", "url": "https://example.com", "timestamps": 5}
+  {"action": "domain_info", "domain": "example.com"}
+  {"action": "coordinated_detection", "accounts": ["user1", "user2"], "platform": "reddit"}
+"""
+
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+
+GATEKEEPER_URL = "http://127.0.0.1:7800"
+
+
+def web_request(url, headers=None, timeout=30):
+    """Make an HTTP GET request with error handling."""
+    default_headers = {
+        "User-Agent": "CleansingFire/0.1 (OSINT research; https://github.com/bedwards/cleansing-fire)",
+        "Accept": "application/json",
+    }
+    if headers:
+        default_headers.update(headers)
+
+    req = urllib.request.Request(url, headers=default_headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {"_raw_text": raw}
+    except urllib.error.HTTPError as e:
+        return {"error": f"HTTP {e.code}: {e.reason}", "error_code": "API_ERROR"}
+    except urllib.error.URLError as e:
+        return {"error": f"Connection error: {e.reason}", "error_code": "API_ERROR"}
+    except Exception as e:
+        return {"error": str(e), "error_code": "INTERNAL_ERROR"}
+
+
+def ask_gatekeeper(prompt, system="", temperature=0.2):
+    """Submit analysis to the gatekeeper LLM."""
+    payload = {
+        "prompt": prompt,
+        "system": system or (
+            "You are an open-source intelligence analyst specializing in detecting "
+            "coordinated inauthentic behavior, astroturfing, corporate influence operations, "
+            "and manufactured consensus on social media. Analyze patterns, not individual "
+            "posts. Look for coordination signals: timing, language similarity, network "
+            "structure, account age/activity patterns."
+        ),
+        "caller": "plugin:osint-social",
+        "temperature": temperature,
+        "max_tokens": 2048,
+        "timeout": 180,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=190) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return f"[LLM Error: {body.get('error', 'unknown')}]"
+    except Exception as e:
+        return f"[Gatekeeper unavailable: {e}]"
+
+
+# ---------------------------------------------------------------------------
+# Reddit (public JSON API -- no auth needed, just append .json)
+# ---------------------------------------------------------------------------
+
+def analyze_reddit_user(username):
+    """Analyze a Reddit user's public posting history."""
+    # Reddit public JSON API
+    url = f"https://www.reddit.com/user/{urllib.parse.quote(username)}/comments.json?limit=100&sort=new"
+    comments = web_request(url)
+
+    url2 = f"https://www.reddit.com/user/{urllib.parse.quote(username)}/submitted.json?limit=100&sort=new"
+    posts = web_request(url2)
+
+    if "error" in comments and "error" in posts:
+        return {"error": f"Could not fetch Reddit data for u/{username}: {comments['error']}", "error_code": "API_ERROR"}
+
+    # Parse comments
+    comment_data = []
+    subreddit_freq = {}
+    hourly_activity = [0] * 24
+    daily_activity = [0] * 7
+
+    for item in (comments.get("data", {}).get("children", [])):
+        c = item.get("data", {})
+        subreddit = c.get("subreddit", "unknown")
+        subreddit_freq[subreddit] = subreddit_freq.get(subreddit, 0) + 1
+
+        created = c.get("created_utc", 0)
+        if created:
+            dt = datetime.fromtimestamp(created, tz=timezone.utc)
+            hourly_activity[dt.hour] += 1
+            daily_activity[dt.weekday()] += 1
+
+        comment_data.append({
+            "subreddit": subreddit,
+            "body": (c.get("body", ""))[:200],
+            "score": c.get("score", 0),
+            "created_utc": created,
+            "permalink": c.get("permalink", ""),
+        })
+
+    # Parse posts
+    post_data = []
+    for item in (posts.get("data", {}).get("children", [])):
+        p = item.get("data", {})
+        subreddit = p.get("subreddit", "unknown")
+        subreddit_freq[subreddit] = subreddit_freq.get(subreddit, 0) + 1
+        post_data.append({
+            "subreddit": subreddit,
+            "title": p.get("title", ""),
+            "score": p.get("score", 0),
+            "num_comments": p.get("num_comments", 0),
+            "created_utc": p.get("created_utc", 0),
+            "url": p.get("url", ""),
+        })
+
+    # Sort subreddits by frequency
+    top_subreddits = sorted(subreddit_freq.items(), key=lambda x: -x[1])[:15]
+
+    # Detect account characteristics
+    account_age_days = None
+    all_timestamps = [c.get("created_utc", 0) for c in comment_data] + [p.get("created_utc", 0) for p in post_data]
+    all_timestamps = [t for t in all_timestamps if t > 0]
+    if all_timestamps:
+        oldest = min(all_timestamps)
+        newest = max(all_timestamps)
+        account_age_days = int((newest - oldest) / 86400) if newest > oldest else 0
+
+    # AI analysis
+    analysis = ask_gatekeeper(f"""Analyze this Reddit account: u/{username}
+
+ACTIVITY SUMMARY:
+- Comments analyzed: {len(comment_data)}
+- Posts analyzed: {len(post_data)}
+- Account activity span: {account_age_days} days
+- Top subreddits: {json.dumps(top_subreddits[:10])}
+- Hourly activity pattern (UTC): {json.dumps(hourly_activity)}
+- Daily activity pattern (Mon=0): {json.dumps(daily_activity)}
+
+RECENT COMMENTS (sample):
+{chr(10).join(f"r/{c['subreddit']}: {c['body'][:100]}" for c in comment_data[:10])}
+
+RECENT POSTS (sample):
+{chr(10).join(f"r/{p['subreddit']}: {p['title']}" for p in post_data[:10])}
+
+ANALYZE:
+1. Is this account focused on specific topics or industries?
+2. Does the posting pattern suggest a real person or an organized account?
+   - Consistent hours suggest timezone (estimate their timezone)
+   - Extremely regular posting suggests automation
+   - Activity only during business hours suggests professional/corporate
+3. Is there evidence of astroturfing or coordinated behavior?
+4. What narratives does this account push consistently?
+5. Does the subreddit distribution suggest organic interest or targeted influence?
+6. Account authenticity score: 1 (clearly fake/bot) to 10 (clearly genuine person)""")
+
+    return {
+        "username": username,
+        "platform": "reddit",
+        "comments_analyzed": len(comment_data),
+        "posts_analyzed": len(post_data),
+        "activity_span_days": account_age_days,
+        "top_subreddits": top_subreddits,
+        "hourly_activity_utc": hourly_activity,
+        "daily_activity": daily_activity,
+        "recent_comments": comment_data[:5],
+        "recent_posts": post_data[:5],
+        "ai_analysis": analysis,
+    }
+
+
+def search_reddit_subreddit(subreddit, query="", sort="hot", limit=25):
+    """Search or browse a subreddit's public posts."""
+    if query:
+        url = f"https://www.reddit.com/r/{urllib.parse.quote(subreddit)}/search.json?q={urllib.parse.quote(query)}&restrict_sr=on&sort=relevance&limit={limit}"
+    else:
+        url = f"https://www.reddit.com/r/{urllib.parse.quote(subreddit)}/{sort}.json?limit={limit}"
+
+    result = web_request(url)
+    if "error" in result:
+        return result
+
+    posts = []
+    for item in result.get("data", {}).get("children", []):
+        p = item.get("data", {})
+        posts.append({
+            "title": p.get("title", ""),
+            "author": p.get("author", ""),
+            "score": p.get("score", 0),
+            "num_comments": p.get("num_comments", 0),
+            "created_utc": p.get("created_utc", 0),
+            "url": p.get("url", ""),
+            "selftext": (p.get("selftext", ""))[:300],
+            "permalink": f"https://reddit.com{p.get('permalink', '')}",
+        })
+
+    return {
+        "subreddit": subreddit,
+        "query": query,
+        "posts": posts,
+        "count": len(posts),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Mastodon / Fediverse (public API)
+# ---------------------------------------------------------------------------
+
+def analyze_mastodon_user(handle):
+    """Analyze a Mastodon/Fediverse user's public presence."""
+    # Parse handle: @user@instance.social
+    parts = handle.strip("@").split("@")
+    if len(parts) != 2:
+        return {"error": f"Invalid Mastodon handle format: {handle}. Expected @user@instance.tld", "error_code": "INVALID_INPUT"}
+
+    username, instance = parts
+
+    # Look up account
+    lookup_url = f"https://{instance}/api/v1/accounts/lookup?acct={username}"
+    account = web_request(lookup_url)
+    if "error" in account:
+        return {"error": f"Could not find Mastodon account {handle}: {account['error']}", "error_code": "API_ERROR"}
+
+    account_id = account.get("id", "")
+    if not account_id:
+        return {"error": f"Account {handle} not found on {instance}", "error_code": "API_ERROR"}
+
+    # Get recent statuses
+    statuses_url = f"https://{instance}/api/v1/accounts/{account_id}/statuses?limit=40&exclude_replies=false"
+    statuses = web_request(statuses_url)
+    if "error" in statuses:
+        statuses = []
+
+    # Parse statuses
+    posts = []
+    boost_count = 0
+    reply_count = 0
+    hourly_activity = [0] * 24
+
+    for s in (statuses if isinstance(statuses, list) else []):
+        is_boost = s.get("reblog") is not None
+        is_reply = s.get("in_reply_to_id") is not None
+        if is_boost:
+            boost_count += 1
+        if is_reply:
+            reply_count += 1
+
+        created = s.get("created_at", "")
+        if created:
+            try:
+                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                hourly_activity[dt.hour] += 1
+            except ValueError:
+                pass
+
+        content = s.get("content", "")
+        # Strip HTML tags
+        clean_content = re.sub(r"<[^>]+>", "", content)
+
+        posts.append({
+            "content": clean_content[:200],
+            "created_at": created,
+            "reblogs_count": s.get("reblogs_count", 0),
+            "favourites_count": s.get("favourites_count", 0),
+            "is_boost": is_boost,
+            "is_reply": is_reply,
+            "visibility": s.get("visibility", ""),
+        })
+
+    profile = {
+        "username": account.get("username", ""),
+        "display_name": account.get("display_name", ""),
+        "instance": instance,
+        "created_at": account.get("created_at", ""),
+        "followers_count": account.get("followers_count", 0),
+        "following_count": account.get("following_count", 0),
+        "statuses_count": account.get("statuses_count", 0),
+        "bio": re.sub(r"<[^>]+>", "", account.get("note", "")),
+        "bot": account.get("bot", False),
+        "locked": account.get("locked", False),
+    }
+
+    analysis = ask_gatekeeper(f"""Analyze this Fediverse/Mastodon account: {handle}
+
+PROFILE:
+{json.dumps(profile, indent=2)}
+
+ACTIVITY STATS:
+- Posts analyzed: {len(posts)}
+- Boosts: {boost_count}
+- Replies: {reply_count}
+- Original posts: {len(posts) - boost_count}
+- Hourly activity (UTC): {json.dumps(hourly_activity)}
+
+RECENT POSTS (sample):
+{chr(10).join(f"[{p['created_at'][:10]}] {'BOOST' if p['is_boost'] else 'POST'}: {p['content'][:100]}" for p in posts[:10])}
+
+ANALYZE:
+1. What topics does this account focus on?
+2. What is the boost-to-original ratio? High boost ratios suggest amplifier accounts.
+3. Is the follower/following ratio unusual?
+4. Does the posting pattern suggest a real person, organization, or bot?
+5. What narratives does this account promote or amplify?
+6. Is this account part of a broader influence network (based on available signals)?""")
+
+    return {
+        "handle": handle,
+        "platform": "mastodon",
+        "profile": profile,
+        "posts_analyzed": len(posts),
+        "boost_count": boost_count,
+        "reply_count": reply_count,
+        "hourly_activity_utc": hourly_activity,
+        "recent_posts": posts[:10],
+        "ai_analysis": analysis,
+    }
+
+
+def search_mastodon(instance, query):
+    """Search a Mastodon instance's public timeline."""
+    url = f"https://{instance}/api/v2/search?q={urllib.parse.quote(query)}&type=statuses&limit=20"
+    result = web_request(url)
+    if "error" in result:
+        return result
+
+    statuses = result.get("statuses", [])
+    posts = []
+    for s in statuses:
+        content = re.sub(r"<[^>]+>", "", s.get("content", ""))
+        account = s.get("account", {})
+        posts.append({
+            "content": content[:300],
+            "author": f"@{account.get('acct', '')}",
+            "created_at": s.get("created_at", ""),
+            "reblogs_count": s.get("reblogs_count", 0),
+            "favourites_count": s.get("favourites_count", 0),
+            "url": s.get("url", ""),
+        })
+
+    return {
+        "instance": instance,
+        "query": query,
+        "posts": posts,
+        "count": len(posts),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Wikipedia edit history (anonymous corporate edits)
+# ---------------------------------------------------------------------------
+
+def analyze_wikipedia_edits(ip_range="", page=""):
+    """
+    Analyze Wikipedia edits from a specific IP range (to detect corporate editing)
+    or edits to a specific page.
+    """
+    edits = []
+
+    if page:
+        # Get revision history for a specific page
+        url = (
+            f"https://en.wikipedia.org/w/api.php?action=query&prop=revisions"
+            f"&titles={urllib.parse.quote(page)}&rvlimit=50&rvprop=user|timestamp|comment|size"
+            f"&format=json"
+        )
+        result = web_request(url)
+        if "error" in result:
+            return result
+
+        pages = result.get("query", {}).get("pages", {})
+        for _page_id, page_data in pages.items():
+            for rev in page_data.get("revisions", []):
+                user = rev.get("user", "")
+                # Check if user is an IP address (anonymous edit)
+                is_anonymous = bool(re.match(r"^\d+\.\d+\.\d+\.\d+$", user))
+                edits.append({
+                    "user": user,
+                    "anonymous": is_anonymous,
+                    "timestamp": rev.get("timestamp", ""),
+                    "comment": rev.get("comment", ""),
+                    "size": rev.get("size", 0),
+                })
+
+    elif ip_range:
+        # Search for contributions from an IP range
+        # Wikipedia API supports single IP lookups
+        ip_base = ip_range.split("/")[0]
+        url = (
+            f"https://en.wikipedia.org/w/api.php?action=query&list=usercontribs"
+            f"&ucuser={urllib.parse.quote(ip_base)}&uclimit=50"
+            f"&ucprop=title|timestamp|comment|sizediff"
+            f"&format=json"
+        )
+        result = web_request(url)
+        if "error" in result:
+            return result
+
+        for contrib in result.get("query", {}).get("usercontribs", []):
+            edits.append({
+                "page": contrib.get("title", ""),
+                "timestamp": contrib.get("timestamp", ""),
+                "comment": contrib.get("comment", ""),
+                "size_diff": contrib.get("sizediff", 0),
+                "ip": ip_base,
+            })
+
+    # AI analysis
+    analysis = None
+    if edits:
+        target = f"IP range {ip_range}" if ip_range else f"page '{page}'"
+        edits_text = "\n".join(
+            json.dumps(e) for e in edits[:20]
+        )
+        analysis = ask_gatekeeper(f"""Analyze Wikipedia edit patterns for {target}.
+
+EDITS:
+{edits_text}
+
+ANALYZE:
+1. If examining an IP range: what pages were edited? Is there a corporate/organizational pattern?
+2. If examining a page: are there anonymous edits from corporate IP ranges?
+3. Are there edit wars (rapid back-and-forth edits)?
+4. Are edits adding favorable content or removing unfavorable content?
+5. Do edit comments suggest professional editing ("cleanup", "corrections", "updating")?
+6. Is there evidence of corporate reputation management via Wikipedia editing?
+7. What time zones are the edits concentrated in?""")
+
+    return {
+        "ip_range": ip_range,
+        "page": page,
+        "edits": edits,
+        "count": len(edits),
+        "anonymous_edits": len([e for e in edits if e.get("anonymous", False)]),
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GitHub organization analysis
+# ---------------------------------------------------------------------------
+
+def analyze_github_org(org_name):
+    """Analyze a GitHub organization's public presence and contributor patterns."""
+    # Org info
+    org_url = f"https://api.github.com/orgs/{urllib.parse.quote(org_name)}"
+    org_info = web_request(org_url)
+    if "error" in org_info:
+        return {"error": f"GitHub org '{org_name}' not found: {org_info['error']}", "error_code": "API_ERROR"}
+
+    # Get repos sorted by stars
+    repos_url = f"https://api.github.com/orgs/{urllib.parse.quote(org_name)}/repos?sort=stars&direction=desc&per_page=20"
+    repos_result = web_request(repos_url)
+    repos = repos_result if isinstance(repos_result, list) else []
+
+    repo_data = []
+    for r in repos[:20]:
+        repo_data.append({
+            "name": r.get("name", ""),
+            "description": (r.get("description") or "")[:150],
+            "stars": r.get("stargazers_count", 0),
+            "forks": r.get("forks_count", 0),
+            "language": r.get("language", ""),
+            "open_issues": r.get("open_issues_count", 0),
+            "license": (r.get("license") or {}).get("spdx_id", ""),
+            "updated_at": r.get("updated_at", ""),
+            "topics": r.get("topics", []),
+        })
+
+    # Get members (public only)
+    members_url = f"https://api.github.com/orgs/{urllib.parse.quote(org_name)}/members?per_page=30"
+    members_result = web_request(members_url)
+    members = members_result if isinstance(members_result, list) else []
+
+    member_data = [
+        {"login": m.get("login", ""), "type": m.get("type", "")}
+        for m in members[:30]
+    ]
+
+    profile = {
+        "name": org_info.get("name", ""),
+        "login": org_info.get("login", ""),
+        "description": org_info.get("description", ""),
+        "blog": org_info.get("blog", ""),
+        "location": org_info.get("location", ""),
+        "public_repos": org_info.get("public_repos", 0),
+        "public_members": org_info.get("public_members", 0) if "public_members" in org_info else len(member_data),
+        "created_at": org_info.get("created_at", ""),
+    }
+
+    analysis = ask_gatekeeper(f"""Analyze GitHub organization: {org_name}
+
+PROFILE:
+{json.dumps(profile, indent=2)}
+
+TOP REPOSITORIES:
+{json.dumps(repo_data[:10], indent=2)}
+
+PUBLIC MEMBERS (sample): {json.dumps([m['login'] for m in member_data[:15]])}
+
+ANALYZE:
+1. What is this organization's open-source strategy?
+2. Are there projects that relate to surveillance, data collection, or control?
+3. What does the license distribution tell us about their openness?
+4. Are there projects that affect public infrastructure or government systems?
+5. Is there evidence of "open-washing" (appearing open while maintaining control)?
+6. What does the contributor base look like?
+7. Are there any notable or concerning projects?""")
+
+    return {
+        "org": org_name,
+        "platform": "github",
+        "profile": profile,
+        "top_repos": repo_data,
+        "public_members": member_data,
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Web Archive (Wayback Machine)
+# ---------------------------------------------------------------------------
+
+def check_web_archive(url, timestamps=5):
+    """Check the Wayback Machine for historical snapshots of a URL."""
+    # Get available snapshots
+    cdx_url = (
+        f"http://web.archive.org/cdx/search/cdx?"
+        f"url={urllib.parse.quote(url)}&output=json&limit={timestamps}"
+        f"&fl=timestamp,statuscode,digest,length"
+        f"&collapse=digest"
+    )
+    result = web_request(cdx_url, timeout=20)
+
+    if "error" in result:
+        return result
+
+    # CDX returns a list of lists, first row is headers
+    if isinstance(result, list) and len(result) > 1:
+        headers = result[0]
+        snapshots = []
+        for row in result[1:]:
+            snapshot = dict(zip(headers, row))
+            ts = snapshot.get("timestamp", "")
+            if ts:
+                # Format: YYYYMMDDHHmmss
+                formatted_ts = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[8:10]}:{ts[10:12]}:{ts[12:14]}"
+                snapshot["formatted_date"] = formatted_ts
+                snapshot["wayback_url"] = f"https://web.archive.org/web/{ts}/{url}"
+            snapshots.append(snapshot)
+
+        return {
+            "url": url,
+            "snapshots": snapshots,
+            "count": len(snapshots),
+            "oldest": snapshots[0].get("formatted_date", "") if snapshots else "",
+            "newest": snapshots[-1].get("formatted_date", "") if snapshots else "",
+        }
+
+    return {
+        "url": url,
+        "snapshots": [],
+        "count": 0,
+        "note": "No archived snapshots found for this URL.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Domain info (basic DNS/registration data)
+# ---------------------------------------------------------------------------
+
+def get_domain_info(domain):
+    """Get basic domain information using public APIs."""
+    # Use RDAP (Registration Data Access Protocol) - the successor to WHOIS
+    rdap_url = f"https://rdap.org/domain/{urllib.parse.quote(domain)}"
+    rdap_result = web_request(rdap_url, timeout=15)
+
+    info = {"domain": domain}
+
+    if "error" not in rdap_result:
+        # Extract key fields from RDAP response
+        info["status"] = rdap_result.get("status", [])
+        info["name"] = rdap_result.get("ldhName", "")
+
+        # Registration dates
+        for event in rdap_result.get("events", []):
+            action = event.get("eventAction", "")
+            date = event.get("eventDate", "")
+            if action == "registration":
+                info["registered"] = date
+            elif action == "expiration":
+                info["expires"] = date
+            elif action == "last changed":
+                info["last_changed"] = date
+
+        # Nameservers
+        nameservers = []
+        for ns in rdap_result.get("nameservers", []):
+            nameservers.append(ns.get("ldhName", ""))
+        info["nameservers"] = nameservers
+
+        # Registrar
+        for entity in rdap_result.get("entities", []):
+            roles = entity.get("roles", [])
+            if "registrar" in roles:
+                vcard = entity.get("vcardArray", [None, []])[1] if entity.get("vcardArray") else []
+                for field in vcard:
+                    if isinstance(field, list) and len(field) >= 4 and field[0] == "fn":
+                        info["registrar"] = field[3]
+
+    # Also check Wayback for this domain
+    archive = check_web_archive(f"https://{domain}", timestamps=3)
+    if archive.get("snapshots"):
+        info["web_archive"] = {
+            "snapshot_count": archive["count"],
+            "oldest_snapshot": archive.get("oldest", ""),
+            "newest_snapshot": archive.get("newest", ""),
+        }
+
+    return info
+
+
+# ---------------------------------------------------------------------------
+# Coordinated behavior detection
+# ---------------------------------------------------------------------------
+
+def detect_coordinated_behavior(accounts, platform="reddit"):
+    """
+    Analyze multiple accounts for signs of coordinated behavior.
+    Looks for: similar posting times, shared subreddits, similar language,
+    simultaneous activity, network patterns.
+    """
+    if not accounts or len(accounts) < 2:
+        return {"error": "Need at least 2 accounts for coordination detection", "error_code": "INVALID_INPUT"}
+
+    account_profiles = []
+
+    if platform == "reddit":
+        for username in accounts[:10]:  # Limit to 10 accounts
+            time.sleep(0.5)  # Be polite to Reddit
+            url = f"https://www.reddit.com/user/{urllib.parse.quote(username)}/comments.json?limit=50&sort=new"
+            comments = web_request(url)
+
+            subreddits = {}
+            timestamps = []
+            words = {}
+
+            for item in (comments.get("data", {}).get("children", [])):
+                c = item.get("data", {})
+                sub = c.get("subreddit", "")
+                subreddits[sub] = subreddits.get(sub, 0) + 1
+                ts = c.get("created_utc", 0)
+                if ts:
+                    timestamps.append(ts)
+                # Simple word frequency (skip common words)
+                body = c.get("body", "").lower()
+                for word in re.findall(r"\b[a-z]{4,}\b", body):
+                    if word not in {"this", "that", "with", "from", "have", "been", "they", "their", "there", "would", "could", "should", "about", "which", "these", "those", "some", "what", "when", "were", "your"}:
+                        words[word] = words.get(word, 0) + 1
+
+            top_subs = sorted(subreddits.items(), key=lambda x: -x[1])[:10]
+            top_words = sorted(words.items(), key=lambda x: -x[1])[:20]
+
+            account_profiles.append({
+                "username": username,
+                "subreddits": dict(top_subs),
+                "top_words": dict(top_words),
+                "comment_count": len(timestamps),
+                "timestamp_range": [min(timestamps), max(timestamps)] if timestamps else [],
+                "timestamps": sorted(timestamps)[-20:],  # Last 20 timestamps
+            })
+
+    # AI analysis for coordination patterns
+    analysis = ask_gatekeeper(f"""COORDINATED BEHAVIOR ANALYSIS
+
+Platform: {platform}
+Accounts being analyzed: {json.dumps(accounts)}
+
+ACCOUNT PROFILES:
+{json.dumps(account_profiles, indent=2)}
+
+DETECT COORDINATION SIGNALS:
+1. SUBREDDIT OVERLAP: Do these accounts post in the same subreddits at unusual rates?
+2. TEMPORAL CORRELATION: Do they post at similar times? Within minutes of each other?
+3. LANGUAGE SIMILARITY: Do they use the same unusual words, phrases, or talking points?
+4. NETWORK STRUCTURE: Do they reply to each other or boost the same content?
+5. ACCOUNT AGE: Were they created around the same time?
+6. ACTIVITY PATTERNS: Do they have similar hourly/daily activity patterns?
+
+Calculate a coordination probability score from 0.0 (definitely independent) to 1.0 (definitely coordinated).
+Explain your reasoning for each signal.
+If coordination is likely, speculate on the purpose (astroturfing, brigading, PR campaign, etc.).""")
+
+    # Calculate basic overlap metrics
+    all_subreddits = [set(p.get("subreddits", {}).keys()) for p in account_profiles]
+    if len(all_subreddits) >= 2:
+        shared_subs = set.intersection(*all_subreddits) if all_subreddits else set()
+        union_subs = set.union(*all_subreddits) if all_subreddits else set()
+        jaccard = len(shared_subs) / len(union_subs) if union_subs else 0
+    else:
+        shared_subs = set()
+        jaccard = 0
+
+    return {
+        "accounts": accounts,
+        "platform": platform,
+        "profiles": account_profiles,
+        "shared_subreddits": list(shared_subs),
+        "subreddit_jaccard_similarity": round(jaccard, 3),
+        "ai_analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
+
+def emit_error(msg, code="INVALID_INPUT"):
+    json.dump({"error": msg, "error_code": code}, sys.stdout, indent=2)
+    sys.exit(1)
+
+
+def main():
+    try:
+        raw = sys.stdin.read()
+        if not raw.strip():
+            emit_error("No input provided. Send JSON with an 'action' field on stdin.", "MISSING_FIELD")
+        input_data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        emit_error(f"Invalid JSON input: {e}", "INVALID_INPUT")
+
+    action = input_data.get("action", "")
+    if not action:
+        emit_error(
+            "Missing 'action' field. Valid actions: reddit_user, reddit_subreddit, "
+            "mastodon_user, mastodon_search, wikipedia_edits, github_org, web_archive, "
+            "domain_info, coordinated_detection",
+            "MISSING_FIELD",
+        )
+
+    if action == "reddit_user":
+        username = input_data.get("username", "")
+        if not username:
+            emit_error("'reddit_user' requires a 'username' field.", "MISSING_FIELD")
+        result = analyze_reddit_user(username)
+
+    elif action == "reddit_subreddit":
+        subreddit = input_data.get("subreddit", "")
+        if not subreddit:
+            emit_error("'reddit_subreddit' requires a 'subreddit' field.", "MISSING_FIELD")
+        result = search_reddit_subreddit(
+            subreddit,
+            query=input_data.get("query", ""),
+            sort=input_data.get("sort", "hot"),
+            limit=input_data.get("limit", 25),
+        )
+
+    elif action == "mastodon_user":
+        handle = input_data.get("handle", "")
+        if not handle:
+            emit_error("'mastodon_user' requires a 'handle' field (e.g. @user@mastodon.social).", "MISSING_FIELD")
+        result = analyze_mastodon_user(handle)
+
+    elif action == "mastodon_search":
+        instance = input_data.get("instance", "mastodon.social")
+        query = input_data.get("query", "")
+        if not query:
+            emit_error("'mastodon_search' requires a 'query' field.", "MISSING_FIELD")
+        result = search_mastodon(instance, query)
+
+    elif action == "wikipedia_edits":
+        ip_range = input_data.get("ip_range", "")
+        page = input_data.get("page", "")
+        if not ip_range and not page:
+            emit_error("'wikipedia_edits' requires 'ip_range' or 'page' field.", "MISSING_FIELD")
+        result = analyze_wikipedia_edits(ip_range=ip_range, page=page)
+
+    elif action == "github_org":
+        org = input_data.get("org", "")
+        if not org:
+            emit_error("'github_org' requires an 'org' field.", "MISSING_FIELD")
+        result = analyze_github_org(org)
+
+    elif action == "web_archive":
+        url = input_data.get("url", "")
+        if not url:
+            emit_error("'web_archive' requires a 'url' field.", "MISSING_FIELD")
+        result = check_web_archive(url, timestamps=input_data.get("timestamps", 5))
+
+    elif action == "domain_info":
+        domain = input_data.get("domain", "")
+        if not domain:
+            emit_error("'domain_info' requires a 'domain' field.", "MISSING_FIELD")
+        result = get_domain_info(domain)
+
+    elif action == "coordinated_detection":
+        accounts = input_data.get("accounts", [])
+        platform = input_data.get("platform", "reddit")
+        if not accounts:
+            emit_error("'coordinated_detection' requires an 'accounts' list.", "MISSING_FIELD")
+        result = detect_coordinated_behavior(accounts, platform)
+
+    else:
+        emit_error(
+            f"Unknown action: '{action}'. Valid actions: reddit_user, reddit_subreddit, "
+            "mastodon_user, mastodon_search, wikipedia_edits, github_org, web_archive, "
+            "domain_info, coordinated_detection",
+            "UNKNOWN_ACTION",
+        )
+
+    json.dump(result, sys.stdout, indent=2)
+    if result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

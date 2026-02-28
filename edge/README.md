@@ -30,6 +30,19 @@ analysis, embedding generation, summarization, and content classification.
 - Routes: `/ai/analyze`, `/ai/embed`, `/ai/summarize`, `/ai/classify`
 - Bindings: Workers AI, Vectorize, KV (inference cache)
 
+### fire-markdown/ -- LLM-Accessible Markdown Proxy
+
+Proxies the GitHub Pages site with content negotiation for LLM/agent
+consumption. Returns normal HTML by default. When an LLM requests markdown
+(via `Accept: text/markdown` header or `?format=md` query param), converts
+HTML to markdown on the fly. Also serves `/llms.txt` following the
+llmstxt.org standard.
+
+- Routes: `/health`, `/llms.txt`, `/llms-full.txt`, `/*` (proxy)
+- Content negotiation: `Accept: text/markdown` header, `?format=md` param
+- Serves .md files directly with `text/markdown` content type
+- No bindings required (stateless proxy)
+
 ### Planned Workers
 
 - **fire-search/** -- Semantic search over civic data (Vectorize + D1)
@@ -50,6 +63,9 @@ npx wrangler deploy
 
 cd edge/fire-ai
 npx wrangler deploy
+
+cd edge/fire-markdown
+npx wrangler deploy
 ```
 
 ### Local Development
@@ -60,6 +76,10 @@ npx wrangler dev
 
 # In another terminal:
 cd edge/fire-ai
+npx wrangler dev
+
+# In another terminal:
+cd edge/fire-markdown
 npx wrangler dev
 ```
 
