@@ -1,0 +1,42 @@
+# =============================================================================
+# Cleansing Fire Scheduler Daemon — systemd service
+# =============================================================================
+# Autonomous operation loop. 25 tasks across 6 categories:
+# sense, analyze, create, distribute, improve, system.
+# Status API on :7802. SIGHUP reloads configuration.
+#
+# Install:
+#   sudo cp daemon/cleansing-fire-scheduler.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable cleansing-fire-scheduler
+#   sudo systemctl start cleansing-fire-scheduler
+#
+# Reload config:
+#   sudo systemctl reload cleansing-fire-scheduler
+#   (or: kill -HUP $(pidof python3 scheduler/scheduler.py))
+#
+# Logs:
+#   journalctl -u cleansing-fire-scheduler -f
+# =============================================================================
+
+[Unit]
+Description=Cleansing Fire Autonomous Scheduler
+After=network.target cleansing-fire-gatekeeper.service cleansing-fire-firewire.service
+Wants=cleansing-fire-gatekeeper.service cleansing-fire-firewire.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=%h/cleansing-fire
+ExecStart=/usr/bin/python3 scheduler/scheduler.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=HOME=%h
+Environment=CF_PROJECT_DIR=%h/cleansing-fire
+
+[Install]
+WantedBy=multi-user.target

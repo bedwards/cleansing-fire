@@ -1,0 +1,34 @@
+# =============================================================================
+# Cleansing Fire FireWire Federation Daemon — systemd service
+# =============================================================================
+# Federation protocol daemon. Ed25519 message signing, gossip propagation,
+# peer discovery, intelligence sharing. Listens on :7801.
+#
+# Install:
+#   sudo cp daemon/cleansing-fire-firewire.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable cleansing-fire-firewire
+#   sudo systemctl start cleansing-fire-firewire
+#
+# Logs:
+#   journalctl -u cleansing-fire-firewire -f
+# =============================================================================
+
+[Unit]
+Description=Cleansing Fire FireWire Federation Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=%h/cleansing-fire
+ExecStart=/usr/bin/python3 daemon/firewire.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=HOME=%h
+
+[Install]
+WantedBy=multi-user.target
