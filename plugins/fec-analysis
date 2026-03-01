@@ -1,0 +1,522 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Campaign Finance Network Analysis
+
+Intelligence layer on top of civic-fec. Traces dark money flows,
+identifies bundling patterns, maps PAC networks, and correlates
+donations with legislative outcomes.
+
+Input JSON:
+  {"action": "donor_network", "candidate": "Smith", "state": "MO", "cycle": 2024}
+  {"action": "industry_sector", "candidate_id": "P80000722", "cycle": 2024}
+  {"action": "timeline", "committee_id": "C00012345", "start_date": "2024-01-01"}
+  {"action": "bundling", "committee_id": "C00012345", "threshold": 3}
+  {"action": "dark_money", "committee_id": "C00012345"}
+  {"action": "correlation", "candidate_id": "P80000722", "bill_keyword": "oil"}
+
+Output JSON: varies by action
+
+Dependencies: civic-fec plugin (for raw FEC data)
+"""
+
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+import urllib.parse
+from collections import defaultdict
+from datetime import datetime
+
+FEC_BASE = "https://api.open.fec.gov/v1"
+GATEKEEPER_URL = os.environ.get("CF_GATEKEEPER_URL", "http://127.0.0.1:7800")
+PROJECT_DIR = os.environ.get("CF_PROJECT_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TEST_MODE = os.environ.get("CF_TEST_MODE") == "1"
+
+
+def fec_api(endpoint, **params):
+    """Call FEC API directly."""
+    if TEST_MODE:
+        return _test_data(endpoint, params)
+
+    api_key = os.environ.get("FEC_API_KEY", "DEMO_KEY")
+    params["api_key"] = api_key
+    query = urllib.parse.urlencode(params, doseq=True)
+    url = f"{FEC_BASE}{endpoint}?{query}"
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CleansingFire/0.1"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return {"error": f"FEC API HTTP {e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ask_gatekeeper(prompt):
+    """Submit analysis prompt to gatekeeper."""
+    if TEST_MODE:
+        return "[Test mode: AI analysis would be generated here]"
+
+    payload = {
+        "prompt": prompt,
+        "system": "You are a campaign finance analyst specializing in dark money, bundling, and corruption patterns. Be precise about money flows. Flag all potential conflicts of interest.",
+        "caller": "plugin:fec-analysis",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            if body.get("status") == "completed":
+                return body.get("result", "")
+            return None
+    except Exception:
+        return None
+
+
+def _test_data(endpoint, params):
+    """Return synthetic test data for offline testing."""
+    if "candidates" in endpoint:
+        return {"results": [
+            {"candidate_id": "P80000722", "name": "TEST CANDIDATE", "party_full": "Democratic",
+             "office_full": "President", "state": "US", "district": None,
+             "election_years": [2020, 2024], "incumbent_challenge_full": "Incumbent",
+             "principal_committees": [{"committee_id": "C00703975", "committee_name": "TEST COMMITTEE"}]},
+        ]}
+    elif "committees" in endpoint:
+        return {"results": [
+            {"committee_id": "C00703975", "name": "TEST PAC", "committee_type_full": "Super PAC",
+             "party_full": None, "treasurer_name": "Test Treasurer",
+             "receipts": 50000000, "disbursements": 48000000, "designation_full": "Independent"},
+        ]}
+    elif "schedule_a" in endpoint:
+        return {"results": [
+            {"contributor_name": "SMITH, JOHN", "contributor_employer": "ACME CORP",
+             "contributor_occupation": "CEO", "contribution_receipt_amount": 5000,
+             "contribution_receipt_date": "2024-06-15", "contributor_city": "ST LOUIS",
+             "contributor_state": "MO"},
+            {"contributor_name": "DOE, JANE", "contributor_employer": "ACME CORP",
+             "contribution_receipt_amount": 5000,
+             "contribution_receipt_date": "2024-06-15", "contributor_city": "CHICAGO",
+             "contributor_state": "IL"},
+            {"contributor_name": "JOHNSON, BOB", "contributor_employer": "ACME CORP",
+             "contribution_receipt_amount": 2500,
+             "contribution_receipt_date": "2024-06-16", "contributor_city": "ST LOUIS",
+             "contributor_state": "MO"},
+            {"contributor_name": "WILLIAMS, AMY", "contributor_employer": "BIGCORP LLC",
+             "contribution_receipt_amount": 10000,
+             "contribution_receipt_date": "2024-03-01", "contributor_city": "NEW YORK",
+             "contributor_state": "NY"},
+        ]}
+    elif "schedule_b" in endpoint:
+        return {"results": [
+            {"recipient_committee_id": "C00012345", "recipient_name": "CANDIDATE FOR AMERICA",
+             "disbursement_amount": 500000, "disbursement_date": "2024-07-01",
+             "disbursement_description": "INDEPENDENT EXPENDITURE"},
+        ]}
+    return {"results": []}
+
+
+# ---------------------------------------------------------------------------
+# Analysis Actions
+# ---------------------------------------------------------------------------
+
+def donor_network(candidate_name, state=None, cycle=2024):
+    """Map donors to a candidate and find shared donors with other candidates."""
+    params = {"q": candidate_name, "sort": "-election_year", "per_page": 5}
+    if state:
+        params["state"] = state
+    cand_result = fec_api("/candidates/search/", **params)
+    if "error" in cand_result:
+        return cand_result
+    candidates = cand_result.get("results", [])
+    if not candidates:
+        return {"error": f"No candidates found for '{candidate_name}'"}
+
+    target = candidates[0]
+    target_committees = [c.get("committee_id") for c in target.get("principal_committees", []) if c.get("committee_id")]
+
+    if not target_committees:
+        return {"error": "No committees found for candidate", "candidate": target.get("name")}
+
+    # Get top donors for each committee
+    all_donors = []
+    employer_map = defaultdict(list)
+
+    for comm_id in target_committees[:2]:
+        contrib_result = fec_api("/schedules/schedule_a/", committee_id=comm_id,
+                                 sort="-contribution_receipt_amount", per_page=50,
+                                 two_year_transaction_period=cycle)
+        for c in contrib_result.get("results", []):
+            donor = {
+                "name": c.get("contributor_name"),
+                "employer": c.get("contributor_employer"),
+                "amount": c.get("contribution_receipt_amount"),
+                "date": c.get("contribution_receipt_date"),
+                "state": c.get("contributor_state"),
+                "city": c.get("contributor_city"),
+            }
+            all_donors.append(donor)
+            emp = (c.get("contributor_employer") or "").upper().strip()
+            if emp and emp not in ("SELF-EMPLOYED", "RETIRED", "NONE", "N/A", "NOT EMPLOYED"):
+                employer_map[emp].append(donor)
+
+    # Find employer clusters (potential bundling networks)
+    clusters = []
+    for employer, donors in sorted(employer_map.items(), key=lambda x: -len(x[1])):
+        if len(donors) >= 2:
+            total = sum(d["amount"] for d in donors if d["amount"])
+            clusters.append({
+                "employer": employer,
+                "donor_count": len(donors),
+                "total_amount": total,
+                "donors": donors[:5],
+            })
+
+    result = {
+        "candidate": {
+            "name": target.get("name"),
+            "id": target.get("candidate_id"),
+            "party": target.get("party_full"),
+            "office": target.get("office_full"),
+            "state": target.get("state"),
+        },
+        "cycle": cycle,
+        "top_donors": sorted(all_donors, key=lambda x: -(x.get("amount") or 0))[:20],
+        "employer_clusters": clusters[:10],
+        "total_donors_analyzed": len(all_donors),
+        "total_amount": sum(d["amount"] for d in all_donors if d.get("amount")),
+    }
+
+    # AI analysis
+    analysis = ask_gatekeeper(
+        f"Analyze this donor network for {target.get('name')} ({target.get('party_full')}, "
+        f"{target.get('office_full')}). Top employer clusters: {json.dumps(clusters[:5])}. "
+        f"Total raised from top donors: ${result['total_amount']:,.0f}. "
+        f"Are there patterns suggesting coordinated giving, industry capture, or potential quid pro quo?"
+    )
+    if analysis:
+        result["ai_analysis"] = analysis
+
+    return result
+
+
+def industry_sector(candidate_id, cycle=2024):
+    """Aggregate donations by employer industry, showing top sectors."""
+    params = {
+        "candidate_id": candidate_id,
+        "sort": "-contribution_receipt_amount",
+        "per_page": 100,
+        "two_year_transaction_period": cycle,
+    }
+    result = fec_api("/schedules/schedule_a/", **params)
+    if "error" in result:
+        return result
+
+    # Group by employer
+    employer_totals = defaultdict(lambda: {"total": 0, "count": 0, "donations": []})
+    for c in result.get("results", []):
+        employer = (c.get("contributor_employer") or "UNKNOWN").upper().strip()
+        amt = c.get("contribution_receipt_amount") or 0
+        employer_totals[employer]["total"] += amt
+        employer_totals[employer]["count"] += 1
+        if len(employer_totals[employer]["donations"]) < 3:
+            employer_totals[employer]["donations"].append({
+                "donor": c.get("contributor_name"),
+                "amount": amt,
+                "date": c.get("contribution_receipt_date"),
+            })
+
+    # Sort by total
+    sectors = []
+    for employer, data in sorted(employer_totals.items(), key=lambda x: -x[1]["total"]):
+        if employer in ("SELF-EMPLOYED", "RETIRED", "NONE", "N/A", "NOT EMPLOYED", "UNKNOWN"):
+            continue
+        sectors.append({
+            "employer": employer,
+            "total": data["total"],
+            "donor_count": data["count"],
+            "sample_donations": data["donations"],
+        })
+
+    return {
+        "candidate_id": candidate_id,
+        "cycle": cycle,
+        "sectors": sectors[:25],
+        "total_analyzed": sum(s["total"] for s in sectors),
+    }
+
+
+def timeline_analysis(committee_id, start_date=None, end_date=None):
+    """Plot donation amounts over time to detect spikes around events."""
+    params = {
+        "committee_id": committee_id,
+        "sort": "contribution_receipt_date",
+        "per_page": 100,
+    }
+    if start_date:
+        params["min_date"] = start_date
+    if end_date:
+        params["max_date"] = end_date
+
+    result = fec_api("/schedules/schedule_a/", **params)
+    if "error" in result:
+        return result
+
+    # Group by date
+    daily = defaultdict(lambda: {"total": 0, "count": 0, "max_single": 0})
+    for c in result.get("results", []):
+        date = c.get("contribution_receipt_date", "unknown")
+        amt = c.get("contribution_receipt_amount") or 0
+        daily[date]["total"] += amt
+        daily[date]["count"] += 1
+        if amt > daily[date]["max_single"]:
+            daily[date]["max_single"] = amt
+
+    # Find spikes (days with unusually high totals)
+    if daily:
+        totals = [d["total"] for d in daily.values()]
+        avg = sum(totals) / len(totals) if totals else 0
+        threshold = avg * 3  # Spike = 3x average
+
+        timeline = []
+        spikes = []
+        for date, data in sorted(daily.items()):
+            entry = {"date": date, **data}
+            timeline.append(entry)
+            if data["total"] > threshold and threshold > 0:
+                entry["spike"] = True
+                spikes.append(entry)
+    else:
+        timeline = []
+        spikes = []
+        avg = 0
+
+    return {
+        "committee_id": committee_id,
+        "timeline": timeline,
+        "daily_average": round(avg, 2),
+        "spike_days": spikes,
+        "total_days": len(daily),
+        "total_amount": sum(d["total"] for d in daily.values()),
+    }
+
+
+def bundling_detection(committee_id, threshold=3):
+    """Detect potential bundling: multiple donations from same employer on same day."""
+    result = fec_api("/schedules/schedule_a/", committee_id=committee_id,
+                     sort="-contribution_receipt_amount", per_page=100)
+    if "error" in result:
+        return result
+
+    # Group by (employer, date) pairs
+    bundles = defaultdict(list)
+    for c in result.get("results", []):
+        employer = (c.get("contributor_employer") or "").upper().strip()
+        date = c.get("contribution_receipt_date", "unknown")
+        if employer and employer not in ("SELF-EMPLOYED", "RETIRED", "NOT EMPLOYED", "NONE"):
+            key = f"{employer}|{date}"
+            bundles[key].append({
+                "donor": c.get("contributor_name"),
+                "amount": c.get("contribution_receipt_amount"),
+                "city": c.get("contributor_city"),
+                "state": c.get("contributor_state"),
+            })
+
+    # Filter to bundles above threshold
+    detected = []
+    for key, donors in bundles.items():
+        if len(donors) >= threshold:
+            employer, date = key.split("|", 1)
+            total = sum(d["amount"] for d in donors if d["amount"])
+            detected.append({
+                "employer": employer,
+                "date": date,
+                "donor_count": len(donors),
+                "total_amount": total,
+                "donors": donors,
+                "bundling_score": round(len(donors) * total / 1000, 1),
+            })
+
+    detected.sort(key=lambda x: -x["bundling_score"])
+
+    analysis = ask_gatekeeper(
+        f"Analyze these potential bundling patterns for committee {committee_id}: "
+        f"{json.dumps(detected[:5])}. "
+        f"Bundling is when a person collects contributions from others and presents them "
+        f"together. What patterns suggest organized bundling vs coincidental same-employer giving?"
+    ) if detected else None
+
+    return {
+        "committee_id": committee_id,
+        "threshold": threshold,
+        "bundles_detected": detected[:15],
+        "total_bundles": len(detected),
+        "ai_analysis": analysis,
+    }
+
+
+def dark_money_trace(committee_id):
+    """Trace money flows: 501(c)(4) → PAC → candidate chain."""
+    # Get committee details
+    comm_result = fec_api(f"/committee/{committee_id}/")
+    if "error" in comm_result:
+        return comm_result
+
+    committee = comm_result.get("results", [{}])[0] if comm_result.get("results") else {}
+
+    # Get incoming transfers (Schedule A, type 15 = contribution from committee)
+    incoming = fec_api("/schedules/schedule_a/", committee_id=committee_id,
+                       line_number="F3X-11AI", sort="-contribution_receipt_amount", per_page=20)
+
+    # Get outgoing transfers (Schedule B — disbursements)
+    outgoing = fec_api("/schedules/schedule_b/", committee_id=committee_id,
+                       sort="-disbursement_amount", per_page=20)
+
+    sources = []
+    for c in incoming.get("results", []):
+        sources.append({
+            "source": c.get("contributor_name"),
+            "source_id": c.get("contributor_committee_id"),
+            "amount": c.get("contribution_receipt_amount"),
+            "date": c.get("contribution_receipt_date"),
+        })
+
+    recipients = []
+    for c in outgoing.get("results", []):
+        recipients.append({
+            "recipient": c.get("recipient_name") or c.get("recipient_committee_name"),
+            "recipient_id": c.get("recipient_committee_id"),
+            "amount": c.get("disbursement_amount"),
+            "date": c.get("disbursement_date"),
+            "purpose": c.get("disbursement_description"),
+        })
+
+    # Build money flow chain
+    chain = {
+        "committee": {
+            "id": committee_id,
+            "name": committee.get("name"),
+            "type": committee.get("committee_type_full"),
+            "designation": committee.get("designation_full"),
+        },
+        "incoming_transfers": sources[:10],
+        "outgoing_transfers": recipients[:10],
+        "total_incoming": sum(s["amount"] for s in sources if s.get("amount")),
+        "total_outgoing": sum(r["amount"] for r in recipients if r.get("amount")),
+    }
+
+    # AI analysis for dark money patterns
+    analysis = ask_gatekeeper(
+        f"Analyze this money flow for potential dark money patterns. "
+        f"Committee: {committee.get('name')} ({committee.get('committee_type_full')}). "
+        f"Incoming from: {json.dumps(sources[:5])}. "
+        f"Outgoing to: {json.dumps(recipients[:5])}. "
+        f"Look for: 501(c)(4) pass-throughs, shell committees, disclose-avoidance patterns."
+    )
+    if analysis:
+        chain["ai_analysis"] = analysis
+
+    return chain
+
+
+def correlation_analysis(candidate_id, bill_keyword):
+    """Correlate donor industries with legislative activity."""
+    # Get donor sectors
+    sectors = industry_sector(candidate_id)
+    if "error" in sectors:
+        return sectors
+
+    # Ask AI for correlation analysis
+    top_sectors = sectors.get("sectors", [])[:10]
+    analysis = ask_gatekeeper(
+        f"Analyze potential quid pro quo patterns. "
+        f"Candidate {candidate_id} receives donations primarily from: "
+        f"{json.dumps(top_sectors[:5])}. "
+        f"Legislative keyword of interest: '{bill_keyword}'. "
+        f"Consider: Do the top donor industries have a financial interest in legislation "
+        f"related to '{bill_keyword}'? What specific legislative actions should be investigated? "
+        f"What would constitute evidence of a pay-to-play relationship?"
+    )
+
+    return {
+        "candidate_id": candidate_id,
+        "bill_keyword": bill_keyword,
+        "top_donor_sectors": top_sectors[:10],
+        "ai_correlation_analysis": analysis,
+        "caveat": "Correlation does not imply causation. This analysis identifies patterns "
+                  "that warrant further investigation, not proof of wrongdoing.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "donor_network")
+
+    if action == "donor_network":
+        result = donor_network(
+            input_data.get("candidate", ""),
+            state=input_data.get("state"),
+            cycle=input_data.get("cycle", 2024),
+        )
+    elif action == "industry_sector":
+        result = industry_sector(
+            input_data.get("candidate_id", ""),
+            cycle=input_data.get("cycle", 2024),
+        )
+    elif action == "timeline":
+        result = timeline_analysis(
+            input_data.get("committee_id", ""),
+            start_date=input_data.get("start_date"),
+            end_date=input_data.get("end_date"),
+        )
+    elif action == "bundling":
+        result = bundling_detection(
+            input_data.get("committee_id", ""),
+            threshold=input_data.get("threshold", 3),
+        )
+    elif action == "dark_money":
+        result = dark_money_trace(
+            input_data.get("committee_id", ""),
+        )
+    elif action == "correlation":
+        result = correlation_analysis(
+            input_data.get("candidate_id", ""),
+            input_data.get("bill_keyword", ""),
+        )
+    else:
+        result = {
+            "error": f"Unknown action: {action}",
+            "available_actions": [
+                "donor_network", "industry_sector", "timeline",
+                "bundling", "dark_money", "correlation",
+            ],
+        }
+
+    json.dump(result, sys.stdout, indent=2)
+    print()
+    if isinstance(result, dict) and result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
