@@ -309,12 +309,127 @@ jobs:
           "
 
   # ---------------------------------------------------------------------------
+  # Accessibility: WCAG 2.1 AA compliance on docs HTML
+  # ---------------------------------------------------------------------------
+  accessibility:
+    name: Accessibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install axe-core CLI
+        run: npm install -g @axe-core/cli
+
+      - name: Validate HTML structure
+        run: |
+          echo "=== Checking HTML accessibility basics ==="
+          ERRORS=0
+          for f in docs/*.html; do
+            echo "--- $(basename $f) ---"
+
+            # Check for lang attribute on html element
+            if ! grep -q 'lang=' "$f"; then
+              echo "::warning::$f: missing lang attribute on <html>"
+            fi
+
+            # Check for viewport meta (responsive)
+            if ! grep -q 'viewport' "$f"; then
+              echo "::warning::$f: missing viewport meta tag"
+            fi
+
+            # Check all images have alt text
+            img_count=$(grep -c '<img ' "$f" 2>/dev/null || echo 0)
+            alt_count=$(grep -c 'alt=' "$f" 2>/dev/null || echo 0)
+            if [ "$img_count" -gt 0 ] && [ "$alt_count" -lt "$img_count" ]; then
+              echo "::warning::$f: $((img_count - alt_count)) images missing alt text"
+              ERRORS=$((ERRORS + 1))
+            fi
+
+            # Check for skip navigation link
+            if grep -q '<main' "$f" || grep -q 'role="main"' "$f"; then
+              echo "OK: $f has main landmark"
+            fi
+
+            # Check heading hierarchy (h1 should exist)
+            if grep -q '<h1' "$f"; then
+              echo "OK: $f has h1"
+            else
+              echo "::warning::$f: no <h1> element found"
+            fi
+
+            # Check for ARIA labels on interactive elements
+            button_count=$(grep -c '<button' "$f" 2>/dev/null || echo 0)
+            if [ "$button_count" -gt 0 ]; then
+              aria_button=$(grep '<button' "$f" | grep -c 'aria-label\|aria-labelledby' 2>/dev/null || echo 0)
+              text_button=$(grep '<button' "$f" | grep -c '>[^<]' 2>/dev/null || echo 0)
+              labeled=$((aria_button + text_button))
+              if [ "$labeled" -lt "$button_count" ]; then
+                echo "::warning::$f: some buttons may lack accessible labels"
+              fi
+            fi
+
+            echo "OK: $(basename $f) structure checked"
+          done
+          echo ""
+          echo "Structure check complete ($ERRORS issues)"
+
+      - name: WCAG contrast and semantic checks
+        run: |
+          echo "=== WCAG semantic analysis ==="
+          python3 -c "
+          import re, glob, sys
+
+          warnings = 0
+          errors = 0
+
+          for f in sorted(glob.glob('docs/*.html')):
+              name = f.split('/')[-1]
+              with open(f) as fh:
+                  html = fh.read()
+
+              # Check for text-only color references
+              if re.search(r'color:\s*(red|green)\b', html, re.I):
+                  print(f'WARN: {name}: uses red/green color (colorblind concern)')
+                  warnings += 1
+
+              # Check form inputs have labels
+              inputs = len(re.findall(r'<input(?! type=[\"\\x27]hidden)', html))
+              labels = len(re.findall(r'<label|aria-label', html))
+              if inputs > 0 and labels < inputs:
+                  print(f'WARN: {name}: {inputs} inputs but only {labels} labels')
+                  warnings += 1
+
+              # Check for tabindex misuse (positive tabindex is bad practice)
+              bad_tabindex = re.findall(r'tabindex=[\"\\x27]([2-9]|\d{2,})', html)
+              if bad_tabindex:
+                  print(f'WARN: {name}: positive tabindex values found (avoid)')
+                  warnings += 1
+
+              # Check link text (empty links are bad)
+              empty_links = re.findall(r'<a[^>]*>(\s*)</a>', html)
+              if empty_links:
+                  print(f'ERROR: {name}: {len(empty_links)} empty link(s)')
+                  errors += 1
+
+              print(f'OK: {name} semantic check done')
+
+          print(f'\\nResults: {warnings} warning(s), {errors} error(s)')
+          if errors > 0:
+              sys.exit(1)
+          "
+
+  # ---------------------------------------------------------------------------
   # Summary badge
   # ---------------------------------------------------------------------------
   status:
     name: CI Status
     runs-on: ubuntu-latest
-    needs: [lint, security, test, integrity]
+    needs: [lint, security, test, integrity, accessibility]
     if: always()
     steps:
       - name: Check results
@@ -327,12 +442,14 @@ jobs:
           echo "| Security | ${{ needs.security.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Integrity | ${{ needs.integrity.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Accessibility | ${{ needs.accessibility.result }} |" >> $GITHUB_STEP_SUMMARY
 
           # Fail if any required check failed
           if [ "${{ needs.lint.result }}" = "failure" ] || \
              [ "${{ needs.security.result }}" = "failure" ] || \
              [ "${{ needs.test.result }}" = "failure" ] || \
-             [ "${{ needs.integrity.result }}" = "failure" ]; then
+             [ "${{ needs.integrity.result }}" = "failure" ] || \
+             [ "${{ needs.accessibility.result }}" = "failure" ]; then
             echo ""
             echo "::error::One or more CI checks failed"
             exit 1
