@@ -1,0 +1,132 @@
+{
+  "_comment": "Test fixtures for Cleansing Fire plugins. Each plugin has sample inputs that can be used in CF_TEST_MODE=1 to validate the JSON contract without calling real APIs.",
+  "plugins": {
+    "civic-fec": {
+      "actions": ["candidate", "donor", "contributions", "crossref"],
+      "fixtures": {
+        "candidate": {
+          "input": {"action": "candidate", "name": "Smith", "state": "MO", "cycle": 2024},
+          "expected_keys": ["candidates"]
+        },
+        "donor": {
+          "input": {"action": "donor", "name": "Koch Industries", "cycle": 2024},
+          "expected_keys": ["donors"]
+        }
+      }
+    },
+    "civic-legiscan": {
+      "actions": ["search", "bill", "monitor"],
+      "fixtures": {
+        "search": {
+          "input": {"action": "search", "query": "water quality", "state": "MO"},
+          "expected_keys": ["results"]
+        }
+      }
+    },
+    "civic-spending": {
+      "actions": ["search", "recipient", "agency"],
+      "fixtures": {
+        "search": {
+          "input": {"action": "search", "query": "prison", "fiscal_year": 2024},
+          "expected_keys": ["results"]
+        }
+      }
+    },
+    "civic-crossref": {
+      "actions": ["investigate", "follow_money", "contract_donors"],
+      "fixtures": {
+        "investigate": {
+          "input": {"action": "investigate", "entity": "Test Corp", "state": "MO"},
+          "expected_keys": ["results"]
+        }
+      }
+    },
+    "corp-sec": {
+      "actions": ["search", "filings", "company", "executive_comp", "related_party", "risk_factors", "insider_transactions", "beneficial_owners"],
+      "fixtures": {
+        "search": {
+          "input": {"action": "search", "query": "Tesla"},
+          "expected_keys": ["results"]
+        }
+      }
+    },
+    "forge-satire": {
+      "actions": ["satirize", "meme-text", "parody", "headline", "roast", "help"],
+      "fixtures": {
+        "help": {
+          "input": {"action": "help"},
+          "expected_keys": ["actions"]
+        }
+      }
+    },
+    "forge-vision": {
+      "actions": ["money_flow", "corruption_meter", "timeline", "ascii_fire", "mermaid", "prompt"],
+      "fixtures": {
+        "ascii_fire": {
+          "input": {"action": "ascii_fire", "intensity": 3},
+          "expected_keys": ["ascii"]
+        }
+      }
+    },
+    "forge-voice": {
+      "actions": ["social", "thread", "digest", "poeticize", "agitprop"],
+      "fixtures": {}
+    },
+    "legal-automation": {
+      "actions": ["foia-generate", "complaint-draft", "rights-card", "cease-desist-respond", "public-comment"],
+      "fixtures": {
+        "rights-card": {
+          "input": {"action": "rights-card", "scenario": "protest"},
+          "expected_keys": ["card"]
+        }
+      }
+    },
+    "lobby-tracker": {
+      "actions": ["search", "registrant", "client", "lobbyist", "issue", "bill_lobbying", "revolving_door", "top_spenders", "industry"],
+      "fixtures": {
+        "search": {
+          "input": {"action": "search", "query": "pharmaceutical"},
+          "expected_keys": ["results"]
+        }
+      }
+    },
+    "narrative-detector": {
+      "actions": ["analyze_article", "compare_articles", "detect_campaign", "track_narrative", "source_analysis", "framing_analysis", "timeline", "think_tank_trace"],
+      "fixtures": {}
+    },
+    "news-monitor": {
+      "actions": ["search", "monitor", "trending", "sources"],
+      "fixtures": {
+        "sources": {
+          "input": {"action": "sources"},
+          "expected_keys": ["sources"]
+        }
+      }
+    },
+    "osint-social": {
+      "actions": ["reddit_user", "reddit_subreddit", "mastodon_user", "mastodon_search", "wikipedia_edits", "github_org", "web_archive", "domain_info", "coordinated_detection"],
+      "fixtures": {}
+    },
+    "pipeline-data-to-fire": {
+      "actions": ["full_investigation", "bill_spotlight", "weekly_fire"],
+      "fixtures": {}
+    },
+    "social-bluesky": {
+      "actions": ["post", "thread", "profile", "timeline", "search"],
+      "fixtures": {}
+    },
+    "social-mastodon": {
+      "actions": ["post", "thread", "timeline", "search", "trending"],
+      "fixtures": {}
+    },
+    "whistleblower-submit": {
+      "actions": ["generate_keypair", "encrypt_tip", "submit_local", "submit_remote", "list_tips", "decrypt_tip", "verify_tor", "security_check"],
+      "fixtures": {
+        "security_check": {
+          "input": {"action": "security_check"},
+          "expected_keys": ["checks"]
+        }
+      }
+    }
+  }
+}
