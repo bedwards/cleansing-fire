@@ -1,0 +1,510 @@
+# =============================================================================
+# Plugin Registry — Cleansing Fire
+# =============================================================================
+# Machine-readable catalog of all plugins with capabilities, dependencies,
+# API requirements, and action definitions.
+#
+# For humans: see plugins/README and docs/intelligence-and-osint.md
+# For agents: use this file for plugin discovery and capability matching
+# =============================================================================
+
+metadata:
+  version: "0.1.0"
+  updated: "2026-02-28"
+  description: "Registry of all Cleansing Fire plugins with capabilities, actions, and dependencies"
+  human_docs:
+    - path: "docs/intelligence-and-osint.md"
+      description: "OSINT and exposure infrastructure narrative"
+    - path: "docs/humor-and-satire.md"
+      description: "Satire engine and comedy as weapon"
+
+# =============================================================================
+# Civic Data Plugins — Government transparency
+# =============================================================================
+
+plugins:
+
+  # ---------------------------------------------------------------------------
+  civic-legiscan:
+    category: civic
+    description: "LegiScan legislation tracking — bill search, details, and monitoring"
+    requires_env: [LEGISCAN_API_KEY]
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: search
+        description: "Search for bills by keyword, state, and session"
+        required_fields: [query]
+        optional_fields: [state, year]
+      - name: bill
+        description: "Get detailed information about a specific bill"
+        required_fields: [bill_id]
+      - name: monitor
+        description: "Track recent bill activity in a state"
+        required_fields: [state]
+
+  # ---------------------------------------------------------------------------
+  civic-fec:
+    category: civic
+    description: "FEC campaign finance data — candidates, donors, contributions"
+    requires_env: []  # Falls back to DEMO_KEY
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: candidate
+        description: "Search for candidate campaign finance info"
+        required_fields: [name]
+        optional_fields: [state, cycle]
+      - name: donor
+        description: "Search for donor/organization contributions"
+        required_fields: [name]
+        optional_fields: [cycle]
+      - name: contributions
+        description: "Search individual contributions"
+        required_fields: [name]
+        optional_fields: [state, cycle, amount_min]
+      - name: crossref
+        description: "Cross-reference donors across candidates"
+        required_fields: [donor_name]
+
+  # ---------------------------------------------------------------------------
+  civic-spending:
+    category: civic
+    description: "USAspending federal spending data — contracts, grants, agencies"
+    requires_env: []  # No key needed
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: search
+        description: "Search federal spending by keyword"
+        required_fields: [query]
+        optional_fields: [fiscal_year]
+      - name: recipient
+        description: "Get spending for a specific recipient"
+        required_fields: [name]
+      - name: agency
+        description: "Get spending breakdown by federal agency"
+        required_fields: [agency]
+
+  # ---------------------------------------------------------------------------
+  civic-crossref:
+    category: civic
+    description: "Cross-reference pipeline — chains civic-legiscan, civic-fec, civic-spending"
+    requires_env: []
+    uses_gatekeeper: false
+    calls_plugins: [civic-legiscan, civic-fec, civic-spending]
+    actions:
+      - name: investigate
+        description: "Full cross-reference investigation of an entity"
+        required_fields: [entity]
+        optional_fields: [state]
+      - name: follow_money
+        description: "Trace money flows around an entity"
+        required_fields: [entity]
+      - name: contract_donors
+        description: "Find overlap between government contractors and campaign donors"
+        required_fields: [entity]
+
+# =============================================================================
+# Corporate Intelligence Plugins
+# =============================================================================
+
+  # ---------------------------------------------------------------------------
+  corp-sec:
+    category: osint
+    description: "SEC EDGAR filing analyzer — company search, filings, executive comp, ownership"
+    requires_env: []  # Uses User-Agent header per SEC requirements
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: search
+        description: "Search for companies in SEC EDGAR"
+        required_fields: [query]
+      - name: filings
+        description: "Get recent filings for a company"
+        required_fields: [cik]
+        optional_fields: [filing_type, count]
+      - name: company
+        description: "Get company details from CIK"
+        required_fields: [cik]
+      - name: executive_comp
+        description: "Extract executive compensation from proxy filings"
+        required_fields: [cik]
+      - name: related_party
+        description: "Find related party transactions"
+        required_fields: [cik]
+      - name: risk_factors
+        description: "Extract risk factor disclosures"
+        required_fields: [cik]
+      - name: insider_transactions
+        description: "Get insider trading (Form 4) data"
+        required_fields: [cik]
+      - name: beneficial_owners
+        description: "Get beneficial ownership from Schedule 13D/G"
+        required_fields: [cik]
+
+  # ---------------------------------------------------------------------------
+  lobby-tracker:
+    category: osint
+    description: "Lobbying disclosure tracker — OpenSecrets API for lobbying, revolving door"
+    requires_env: [OPENSECRETS_API_KEY]
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: search
+        description: "Search lobbying disclosures"
+        required_fields: [query]
+      - name: registrant
+        description: "Get lobbying firm details"
+        required_fields: [registrant_id]
+      - name: client
+        description: "Get client lobbying activity"
+        required_fields: [client_name]
+      - name: lobbyist
+        description: "Search individual lobbyists"
+        required_fields: [name]
+      - name: issue
+        description: "Search by lobbying issue area"
+        required_fields: [issue_code]
+      - name: bill_lobbying
+        description: "Find lobbying activity on specific bills"
+        required_fields: [bill_id]
+      - name: revolving_door
+        description: "Find revolving door connections"
+        required_fields: [name]
+      - name: top_spenders
+        description: "Get top lobbying spenders"
+        optional_fields: [year, limit]
+      - name: industry
+        description: "Get lobbying by industry sector"
+        required_fields: [industry]
+
+  # ---------------------------------------------------------------------------
+  narrative-detector:
+    category: osint
+    description: "Coordinated narrative and PR campaign detector"
+    requires_env: []
+    uses_gatekeeper: true
+    calls_plugins: []
+    actions:
+      - name: analyze_article
+        description: "Detect PR patterns in a single article"
+        required_fields: [text]
+        optional_fields: [url, source]
+      - name: compare_articles
+        description: "Compare multiple articles for coordinated messaging"
+        required_fields: [articles]
+      - name: detect_campaign
+        description: "Detect if content is part of a PR campaign"
+        required_fields: [text]
+      - name: track_narrative
+        description: "Track a narrative across time"
+        required_fields: [narrative, timeframe]
+      - name: source_analysis
+        description: "Analyze source credibility and bias"
+        required_fields: [source]
+      - name: framing_analysis
+        description: "Analyze framing and rhetorical strategies"
+        required_fields: [text]
+      - name: timeline
+        description: "Build narrative timeline"
+        required_fields: [topic]
+      - name: think_tank_trace
+        description: "Trace think tank influence on narrative"
+        required_fields: [topic]
+
+  # ---------------------------------------------------------------------------
+  osint-social:
+    category: osint
+    description: "Social media OSINT — Reddit, Mastodon, Wikipedia, GitHub, domain, web archive"
+    requires_env: []
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: reddit_user
+        description: "Analyze Reddit user activity patterns"
+        required_fields: [username]
+      - name: reddit_subreddit
+        description: "Analyze subreddit activity and trends"
+        required_fields: [subreddit]
+      - name: mastodon_user
+        description: "Analyze Mastodon user profile and posts"
+        required_fields: [account_url]
+      - name: mastodon_search
+        description: "Search Mastodon for a topic"
+        required_fields: [query]
+      - name: wikipedia_edits
+        description: "Analyze Wikipedia edit patterns for an article"
+        required_fields: [article]
+      - name: github_org
+        description: "Analyze GitHub organization activity"
+        required_fields: [org]
+      - name: web_archive
+        description: "Search Wayback Machine for historical snapshots"
+        required_fields: [url]
+      - name: domain_info
+        description: "WHOIS and DNS analysis for a domain"
+        required_fields: [domain]
+      - name: coordinated_detection
+        description: "Detect coordinated inauthentic behavior patterns"
+        required_fields: [accounts]
+
+  # ---------------------------------------------------------------------------
+  news-monitor:
+    category: osint
+    description: "News monitoring — RSS feeds, NewsAPI, Mediastack, trending detection"
+    requires_env: []  # NEWSAPI_KEY and MEDIASTACK_KEY optional, falls back to RSS
+    uses_gatekeeper: true
+    calls_plugins: []
+    actions:
+      - name: search
+        description: "Search news across multiple sources"
+        required_fields: [query]
+        optional_fields: [sources, days]
+      - name: monitor
+        description: "Set up monitoring for a topic"
+        required_fields: [query]
+      - name: trending
+        description: "Get trending topics"
+        optional_fields: [category]
+      - name: sources
+        description: "List available news sources"
+
+# =============================================================================
+# Content Generation (Forge) Plugins
+# =============================================================================
+
+  # ---------------------------------------------------------------------------
+  forge-satire:
+    category: forge
+    description: "Satirical content generator — doublespeak, memes, parody, headlines, roasts"
+    requires_env: []
+    uses_gatekeeper: true
+    calls_plugins: []
+    actions:
+      - name: satirize
+        description: "Translate corporate/government text into doublespeak"
+        required_fields: [text]
+      - name: meme-text
+        description: "Generate meme-style captions from data"
+        required_fields: [topic]
+      - name: parody
+        description: "Generate parody press release, memo, or FAQ"
+        required_fields: [type, subject]
+      - name: headline
+        description: "Generate satirical headlines (Onion/Borowitz style)"
+        required_fields: [topic]
+      - name: roast
+        description: "Data-driven satirical roast"
+        required_fields: [entity]
+      - name: help
+        description: "List available actions"
+
+  # ---------------------------------------------------------------------------
+  forge-vision:
+    category: forge
+    description: "Visual content generator — SVG diagrams, ASCII art, Mermaid, image prompts"
+    requires_env: []
+    uses_gatekeeper: true
+    calls_plugins: []
+    actions:
+      - name: money_flow
+        description: "Generate money flow SVG diagram"
+        required_fields: [flows]
+      - name: corruption_meter
+        description: "Generate corruption risk meter SVG"
+        required_fields: [entity, score]
+      - name: timeline
+        description: "Generate event timeline SVG"
+        required_fields: [events]
+      - name: ascii_fire
+        description: "Generate ASCII art fire animation"
+        optional_fields: [intensity]
+      - name: mermaid
+        description: "Generate Mermaid diagram from data"
+        required_fields: [type, data]
+      - name: prompt
+        description: "Generate image generation prompts"
+        required_fields: [concept]
+
+  # ---------------------------------------------------------------------------
+  forge-voice:
+    category: forge
+    description: "Text content generator — social posts, threads, digests, poetry, agitprop"
+    requires_env: []
+    uses_gatekeeper: true
+    calls_plugins: []
+    actions:
+      - name: social
+        description: "Generate social media post"
+        required_fields: [data]
+        optional_fields: [platform, tone]
+      - name: thread
+        description: "Generate multi-post thread"
+        required_fields: [data]
+      - name: digest
+        description: "Generate newsletter/digest from data"
+        required_fields: [items]
+      - name: poeticize
+        description: "Transform data into poetry"
+        required_fields: [data]
+      - name: agitprop
+        description: "Generate agitational propaganda"
+        required_fields: [issue]
+
+# =============================================================================
+# Distribution Plugins
+# =============================================================================
+
+  # ---------------------------------------------------------------------------
+  social-bluesky:
+    category: distribution
+    description: "Bluesky AT Protocol bridge — post, thread, profile, timeline, search"
+    requires_env: [BLUESKY_HANDLE, BLUESKY_APP_PASSWORD]
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: post
+        description: "Post to Bluesky"
+        required_fields: [text]
+      - name: thread
+        description: "Post a thread to Bluesky"
+        required_fields: [posts]
+      - name: profile
+        description: "Get a Bluesky profile"
+        required_fields: [handle]
+      - name: timeline
+        description: "Get the authenticated user's timeline"
+      - name: search
+        description: "Search Bluesky posts"
+        required_fields: [query]
+
+  # ---------------------------------------------------------------------------
+  social-mastodon:
+    category: distribution
+    description: "Mastodon bridge — post, thread, timeline, search, trending"
+    requires_env: [MASTODON_INSTANCE, MASTODON_ACCESS_TOKEN]
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: post
+        description: "Post to Mastodon"
+        required_fields: [text]
+      - name: thread
+        description: "Post a thread to Mastodon"
+        required_fields: [posts]
+      - name: timeline
+        description: "Get the home timeline"
+      - name: search
+        description: "Search Mastodon"
+        required_fields: [query]
+      - name: trending
+        description: "Get trending hashtags and posts"
+
+# =============================================================================
+# Legal & Security Plugins
+# =============================================================================
+
+  # ---------------------------------------------------------------------------
+  legal-automation:
+    category: legal
+    description: "Legal document generator — FOIA, regulatory complaints, rights cards, public comments"
+    requires_env: []
+    uses_gatekeeper: true
+    calls_plugins: []
+    actions:
+      - name: foia-generate
+        description: "Generate a FOIA request letter"
+        required_fields: [agency, topic]
+        optional_fields: [state, details]
+      - name: complaint-draft
+        description: "Draft a regulatory complaint (FTC/FCC/SEC/EPA/CFPB)"
+        required_fields: [agency, subject]
+      - name: rights-card
+        description: "Generate a know-your-rights card"
+        required_fields: [scenario]
+      - name: cease-desist-respond
+        description: "Draft a response to a cease-and-desist letter"
+        required_fields: [letter_text]
+      - name: public-comment
+        description: "Draft a public comment for rulemaking"
+        required_fields: [docket, position]
+
+  # ---------------------------------------------------------------------------
+  whistleblower-submit:
+    category: security
+    description: "Secure tip submission — encryption, Tor verification, local/remote submission"
+    requires_env: []  # TOR_SOCKS_PROXY optional
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: generate_keypair
+        description: "Generate Ed25519 keypair for tip encryption"
+      - name: encrypt_tip
+        description: "Encrypt a tip for secure submission"
+        required_fields: [tip_text, recipient_pubkey]
+      - name: submit_local
+        description: "Submit encrypted tip to local storage"
+        required_fields: [encrypted_tip]
+      - name: submit_remote
+        description: "Submit encrypted tip via Tor (if available)"
+        required_fields: [encrypted_tip, endpoint]
+      - name: list_tips
+        description: "List received tips (requires private key)"
+      - name: decrypt_tip
+        description: "Decrypt a received tip"
+        required_fields: [encrypted_tip, private_key]
+      - name: verify_tor
+        description: "Verify Tor connectivity"
+      - name: security_check
+        description: "Run security environment checks"
+
+# =============================================================================
+# Pipeline & Federation Plugins
+# =============================================================================
+
+  # ---------------------------------------------------------------------------
+  pipeline-data-to-fire:
+    category: pipeline
+    description: "Full pipeline: data → analysis → visualization → narrative → distribution"
+    requires_env: []
+    uses_gatekeeper: true
+    calls_plugins: [civic-legiscan, civic-fec, civic-spending, forge-vision, forge-voice]
+    actions:
+      - name: full_investigation
+        description: "Run full investigation pipeline on an entity"
+        required_fields: [entity]
+        optional_fields: [state]
+      - name: bill_spotlight
+        description: "Spotlight a specific bill with full analysis"
+        required_fields: [bill_id]
+      - name: weekly_fire
+        description: "Generate weekly digest from recent data"
+
+  # ---------------------------------------------------------------------------
+  firewire-relay:
+    category: federation
+    description: "FireWire protocol relay — message relay, peer discovery, network operations"
+    requires_env: []  # FIREWIRE_URL optional, defaults to localhost:7801
+    uses_gatekeeper: false
+    calls_plugins: []
+    actions:
+      - name: relay
+        description: "Relay a signed message to the network"
+        required_fields: [message]
+      - name: peers
+        description: "List known peers"
+      - name: announce
+        description: "Announce this node's presence"
+
+  # ---------------------------------------------------------------------------
+  example-summarize:
+    category: example
+    description: "Example/template plugin — demonstrates the plugin contract"
+    requires_env: []
+    uses_gatekeeper: true
+    calls_plugins: []
+    actions:
+      - name: summarize
+        description: "Summarize input text using the gatekeeper LLM"
+        required_fields: [text]

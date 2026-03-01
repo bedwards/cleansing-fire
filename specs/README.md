@@ -68,8 +68,11 @@ Specs should be validatable:
 |------|--------|---------|
 | `project-graph.yaml` | YAML | Component dependency graph -- what exists and how it connects |
 | `plugin-schema.json` | JSON Schema | Formal definition of the plugin interface contract |
+| `plugin-registry.yaml` | YAML | Catalog of all plugins with actions, dependencies, and API requirements |
 | `agent-capabilities.yaml` | YAML | What AI agents can do, their tools, and their boundaries |
 | `goals.yaml` | YAML | Project goal hierarchy with success criteria and priorities |
+| `deployment-spec.yaml` | YAML | Deployment targets, configurations, and infrastructure bindings |
+| `data-model.yaml` | YAML | D1 database schema -- tables, columns, types, constraints |
 
 ## Relationship to CLAUDE.md
 
