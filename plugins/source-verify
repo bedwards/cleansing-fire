@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Source Verification Pipeline
+
+Implements a confidence taxonomy for evaluating source reliability
+and claim verification. Every piece of civic intelligence needs
+a confidence score so consumers know what to trust.
+
+Input JSON:
+  {"action": "evaluate_source", "source": "Reuters", "url": "https://..."}
+  {"action": "verify_claim", "claim": "Company X received $10M grant", "sources": [...]}
+  {"action": "cross_reference", "claim": "...", "source_count": 3}
+  {"action": "taxonomy", "level": "verified"}
+  {"action": "provenance", "content_id": "abc123"}
+
+Output JSON: varies by action
+
+Confidence Levels (from specs/agent-capabilities.yaml):
+  VERIFIED    — Multiple independent sources confirm, primary documents available
+  HIGH        — Reputable source with track record, corroborated by at least 1 other
+  MODERATE    — Single reputable source, not yet independently confirmed
+  LOW         — Single source of unknown reliability, or social media origin
+  UNVERIFIED  — No source verification performed, raw claim
+  DISPUTED    — Contradicted by credible source(s)
+"""
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from datetime import datetime
+
+GATEKEEPER_URL = os.environ.get("CF_GATEKEEPER_URL", "http://127.0.0.1:7800")
+TEST_MODE = os.environ.get("CF_TEST_MODE") == "1"
+
+# Source reliability database — curated ratings
+SOURCE_RATINGS = {
+    # Tier 1: Primary sources (government, court records)
+    "fec.gov": {"tier": 1, "type": "government", "reliability": 0.95, "bias": "none"},
+    "congress.gov": {"tier": 1, "type": "government", "reliability": 0.95, "bias": "none"},
+    "usaspending.gov": {"tier": 1, "type": "government", "reliability": 0.95, "bias": "none"},
+    "courtlistener.com": {"tier": 1, "type": "legal", "reliability": 0.90, "bias": "none"},
+    "sec.gov": {"tier": 1, "type": "government", "reliability": 0.95, "bias": "none"},
+    "federalregister.gov": {"tier": 1, "type": "government", "reliability": 0.95, "bias": "none"},
+
+    # Tier 2: Wire services and investigative outlets
+    "apnews.com": {"tier": 2, "type": "wire", "reliability": 0.88, "bias": "center"},
+    "reuters.com": {"tier": 2, "type": "wire", "reliability": 0.88, "bias": "center"},
+    "propublica.org": {"tier": 2, "type": "investigative", "reliability": 0.85, "bias": "center-left"},
+    "opensecrets.org": {"tier": 2, "type": "research", "reliability": 0.87, "bias": "nonpartisan"},
+    "thetrace.org": {"tier": 2, "type": "investigative", "reliability": 0.82, "bias": "center-left"},
+
+    # Tier 3: Major news outlets
+    "nytimes.com": {"tier": 3, "type": "newspaper", "reliability": 0.80, "bias": "center-left"},
+    "washingtonpost.com": {"tier": 3, "type": "newspaper", "reliability": 0.80, "bias": "center-left"},
+    "wsj.com": {"tier": 3, "type": "newspaper", "reliability": 0.80, "bias": "center-right"},
+    "bbc.com": {"tier": 3, "type": "broadcaster", "reliability": 0.82, "bias": "center"},
+    "theguardian.com": {"tier": 3, "type": "newspaper", "reliability": 0.78, "bias": "center-left"},
+
+    # Tier 4: Regional/local media
+    "stltoday.com": {"tier": 4, "type": "local", "reliability": 0.72, "bias": "center"},
+
+    # Tier 5: Partisan/advocacy (use with caution)
+    "heritage.org": {"tier": 5, "type": "think_tank", "reliability": 0.55, "bias": "right"},
+    "cato.org": {"tier": 5, "type": "think_tank", "reliability": 0.60, "bias": "libertarian"},
+    "brookings.edu": {"tier": 5, "type": "think_tank", "reliability": 0.70, "bias": "center-left"},
+    "epi.org": {"tier": 5, "type": "think_tank", "reliability": 0.65, "bias": "left"},
+}
+
+# Confidence level definitions
+CONFIDENCE_TAXONOMY = {
+    "verified": {
+        "level": "VERIFIED",
+        "score_range": [0.85, 1.0],
+        "requirements": [
+            "Multiple independent sources confirm",
+            "Primary documents available and reviewed",
+            "No credible contradicting sources",
+            "Cross-referenced with government records where applicable",
+        ],
+        "display": "✓ VERIFIED",
+        "color": "#22c55e",
+    },
+    "high": {
+        "level": "HIGH",
+        "score_range": [0.70, 0.85],
+        "requirements": [
+            "At least one reputable source (Tier 1-3)",
+            "Corroborated by at least 1 other independent source",
+            "Consistent with known facts",
+        ],
+        "display": "● HIGH CONFIDENCE",
+        "color": "#3b82f6",
+    },
+    "moderate": {
+        "level": "MODERATE",
+        "score_range": [0.50, 0.70],
+        "requirements": [
+            "Single reputable source (Tier 1-4)",
+            "Plausible but not independently confirmed",
+            "No contradicting evidence found",
+        ],
+        "display": "◐ MODERATE",
+        "color": "#f59e0b",
+    },
+    "low": {
+        "level": "LOW",
+        "score_range": [0.25, 0.50],
+        "requirements": [
+            "Single source of unknown reliability",
+            "Social media origin without corroboration",
+            "Anonymous tip without supporting evidence",
+        ],
+        "display": "◯ LOW CONFIDENCE",
+        "color": "#ef4444",
+    },
+    "unverified": {
+        "level": "UNVERIFIED",
+        "score_range": [0.0, 0.25],
+        "requirements": [
+            "No source verification performed",
+            "Raw claim without any supporting evidence",
+        ],
+        "display": "? UNVERIFIED",
+        "color": "#6b7280",
+    },
+    "disputed": {
+        "level": "DISPUTED",
+        "score_range": None,
+        "requirements": [
+            "Contradicted by credible source(s)",
+            "Competing claims from sources of similar reliability",
+        ],
+        "display": "⚠ DISPUTED",
+        "color": "#dc2626",
+    },
+}
+
+
+def ask_gatekeeper(prompt):
+    """Submit analysis prompt to gatekeeper."""
+    if TEST_MODE:
+        return "[Test mode: AI verification analysis would be generated here]"
+    payload = {
+        "prompt": prompt,
+        "system": "You are a fact-checking analyst. Evaluate claims with rigorous methodology. "
+                  "Distinguish between verified facts, supported inferences, and speculation. "
+                  "Always flag uncertainty. Never present inference as fact.",
+        "caller": "plugin:source-verify",
+        "temperature": 0.1,
+        "max_tokens": 2048,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return body.get("result", "") if body.get("status") == "completed" else None
+    except Exception:
+        return None
+
+
+def _extract_domain(url):
+    """Extract domain from URL."""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        domain = parsed.netloc.replace("www.", "")
+        return domain
+    except Exception:
+        return url
+
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+
+def evaluate_source(source_name, url=None):
+    """Evaluate a source's reliability rating."""
+    domain = _extract_domain(url) if url else source_name.lower().replace(" ", "")
+
+    # Look up in known ratings
+    rating = None
+    for known_domain, info in SOURCE_RATINGS.items():
+        if known_domain in domain or domain in known_domain:
+            rating = info
+            rating["domain"] = known_domain
+            break
+
+    if rating:
+        return {
+            "source": source_name,
+            "domain": rating.get("domain", domain),
+            "tier": rating["tier"],
+            "type": rating["type"],
+            "reliability_score": rating["reliability"],
+            "political_bias": rating["bias"],
+            "assessment": f"Tier {rating['tier']} source — "
+                         f"{'highly reliable' if rating['reliability'] > 0.85 else 'generally reliable' if rating['reliability'] > 0.70 else 'use with caution'}",
+        }
+    else:
+        return {
+            "source": source_name,
+            "domain": domain,
+            "tier": None,
+            "reliability_score": None,
+            "assessment": "Unknown source — not in reliability database. "
+                         "Treat as UNVERIFIED until independently corroborated.",
+            "recommendation": "Cross-reference claims with Tier 1-3 sources before publishing.",
+        }
+
+
+def verify_claim(claim, sources=None):
+    """Verify a claim against multiple sources."""
+    sources = sources or []
+
+    # Evaluate each source
+    source_evaluations = []
+    total_reliability = 0
+    for src in sources:
+        if isinstance(src, dict):
+            eval_result = evaluate_source(src.get("name", ""), src.get("url"))
+        else:
+            eval_result = evaluate_source(str(src))
+        source_evaluations.append(eval_result)
+        if eval_result.get("reliability_score"):
+            total_reliability += eval_result["reliability_score"]
+
+    # Calculate confidence level
+    num_sources = len(source_evaluations)
+    avg_reliability = total_reliability / num_sources if num_sources > 0 else 0
+    has_primary = any(s.get("tier") == 1 for s in source_evaluations)
+    has_tier2 = any(s.get("tier") == 2 for s in source_evaluations)
+
+    if has_primary and num_sources >= 2 and avg_reliability >= 0.85:
+        confidence = "verified"
+    elif (has_primary or has_tier2) and num_sources >= 2:
+        confidence = "high"
+    elif num_sources >= 1 and avg_reliability >= 0.50:
+        confidence = "moderate"
+    elif num_sources >= 1:
+        confidence = "low"
+    else:
+        confidence = "unverified"
+
+    confidence_info = CONFIDENCE_TAXONOMY[confidence]
+
+    # AI verification analysis
+    analysis = ask_gatekeeper(
+        f"Evaluate this claim for factual accuracy: \"{claim}\"\n\n"
+        f"Sources provided: {json.dumps([s.get('source', str(s)) for s in source_evaluations])}\n"
+        f"Source reliability: {json.dumps([s.get('reliability_score') for s in source_evaluations])}\n\n"
+        f"Assess: (1) Is the claim verifiable? (2) Are the sources sufficient? "
+        f"(3) What additional verification would strengthen confidence?"
+    )
+
+    return {
+        "claim": claim,
+        "confidence_level": confidence_info["level"],
+        "confidence_display": confidence_info["display"],
+        "confidence_score": round(avg_reliability, 2),
+        "source_count": num_sources,
+        "sources": source_evaluations,
+        "has_primary_source": has_primary,
+        "verification_requirements": confidence_info["requirements"],
+        "ai_analysis": analysis,
+        "verified_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+def cross_reference(claim, source_count=0, primary_available=False):
+    """Quick cross-reference scoring without full source evaluation."""
+    if primary_available and source_count >= 3:
+        level = "verified"
+    elif source_count >= 2:
+        level = "high"
+    elif source_count == 1:
+        level = "moderate"
+    else:
+        level = "unverified"
+
+    info = CONFIDENCE_TAXONOMY[level]
+    return {
+        "claim": claim,
+        "confidence_level": info["level"],
+        "confidence_display": info["display"],
+        "source_count": source_count,
+        "primary_available": primary_available,
+        "next_steps": info["requirements"],
+    }
+
+
+def taxonomy(level=None):
+    """Return the full confidence taxonomy or info about a specific level."""
+    if level and level.lower() in CONFIDENCE_TAXONOMY:
+        return CONFIDENCE_TAXONOMY[level.lower()]
+    return {
+        "taxonomy": CONFIDENCE_TAXONOMY,
+        "source_database_size": len(SOURCE_RATINGS),
+        "tiers": {
+            1: "Primary sources (government, court records)",
+            2: "Wire services and investigative outlets",
+            3: "Major news outlets",
+            4: "Regional/local media",
+            5: "Partisan/advocacy (use with caution)",
+        },
+    }
+
+
+def provenance(content_id):
+    """Get provenance chain for a piece of content."""
+    if TEST_MODE:
+        return {
+            "content_id": content_id,
+            "provenance_chain": [
+                {"step": "collection", "source": "FEC API", "timestamp": "2024-06-15T10:00:00Z",
+                 "confidence": "verified", "agent": "data-collector"},
+                {"step": "analysis", "model": "claude-opus-4", "timestamp": "2024-06-15T10:05:00Z",
+                 "confidence": "high", "agent": "analysis-agent"},
+                {"step": "human_review", "reviewer": "bedwards", "timestamp": "2024-06-15T12:00:00Z",
+                 "confidence": "verified", "decision": "approved"},
+                {"step": "publication", "platform": "web", "timestamp": "2024-06-15T12:30:00Z",
+                 "url": "https://cleansingfire.org/investigations/test"},
+            ],
+            "overall_confidence": "verified",
+            "human_reviewed": True,
+        }
+    return {"error": "Production provenance requires content database access"}
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "taxonomy")
+
+    if action == "evaluate_source":
+        result = evaluate_source(
+            input_data.get("source", ""),
+            url=input_data.get("url"))
+    elif action == "verify_claim":
+        result = verify_claim(
+            input_data.get("claim", ""),
+            sources=input_data.get("sources"))
+    elif action == "cross_reference":
+        result = cross_reference(
+            input_data.get("claim", ""),
+            source_count=input_data.get("source_count", 0),
+            primary_available=input_data.get("primary_available", False))
+    elif action == "taxonomy":
+        result = taxonomy(level=input_data.get("level"))
+    elif action == "provenance":
+        result = provenance(input_data.get("content_id", ""))
+    else:
+        result = {"error": f"Unknown action: {action}",
+                  "available_actions": ["evaluate_source", "verify_claim",
+                                        "cross_reference", "taxonomy", "provenance"]}
+
+    json.dump(result, sys.stdout, indent=2)
+    print()
+    if isinstance(result, dict) and result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
