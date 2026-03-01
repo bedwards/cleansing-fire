@@ -1,0 +1,422 @@
+# =============================================================================
+# Data Model — Cleansing Fire
+# =============================================================================
+# D1 database schema specification for civic data storage.
+# Defines all tables, columns, types, constraints, and relationships.
+#
+# For humans: see docs/global-architecture.md (section on D1)
+# For agents: use this file for query construction and data insertion
+# =============================================================================
+
+metadata:
+  version: "0.1.0"
+  updated: "2026-02-28"
+  description: "D1 database schema for civic-data and fire-relay databases"
+  human_docs:
+    - path: "docs/global-architecture.md"
+      description: "Planetary-scale architecture including data layer"
+    - path: "docs/cloudflare-implementation.md"
+      description: "Cloudflare implementation with D1 details"
+
+# =============================================================================
+# Database: civic-data (bound as CIVIC_DB in fire-api)
+# =============================================================================
+
+databases:
+
+  civic-data:
+    binding: CIVIC_DB
+    worker: fire-api
+    description: "Primary structured data store for civic intelligence"
+
+    tables:
+
+      # -----------------------------------------------------------------------
+      # Core entities — people, organizations, and their relationships
+      # -----------------------------------------------------------------------
+
+      entities:
+        description: "People, companies, agencies, PACs, and other entities under investigation"
+        columns:
+          id:
+            type: TEXT
+            primary_key: true
+            description: "UUID v4"
+          name:
+            type: TEXT
+            not_null: true
+            description: "Primary name of the entity"
+          type:
+            type: TEXT
+            not_null: true
+            description: "Entity type"
+            check: "type IN ('person', 'company', 'agency', 'pac', 'nonprofit', 'lobbyist', 'media', 'other')"
+          aliases:
+            type: TEXT
+            description: "JSON array of alternate names, previous names"
+          description:
+            type: TEXT
+            description: "Brief description"
+          source:
+            type: TEXT
+            description: "Where this entity was first identified"
+          confidence:
+            type: REAL
+            default: 0.5
+            description: "Confidence score 0.0-1.0"
+            check: "confidence >= 0.0 AND confidence <= 1.0"
+          created_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+          updated_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+        indexes:
+          - name: idx_entities_type
+            columns: [type]
+          - name: idx_entities_name
+            columns: [name]
+
+      # -----------------------------------------------------------------------
+      relationships:
+        description: "Connections between entities — ownership, donation, employment, lobbying"
+        columns:
+          id:
+            type: TEXT
+            primary_key: true
+          source_entity_id:
+            type: TEXT
+            not_null: true
+            foreign_key: "entities(id)"
+          target_entity_id:
+            type: TEXT
+            not_null: true
+            foreign_key: "entities(id)"
+          type:
+            type: TEXT
+            not_null: true
+            description: "Relationship type"
+            check: "type IN ('owns', 'subsidiary_of', 'donates_to', 'employs', 'lobbies_for', 'contracts_with', 'board_member', 'revolving_door', 'related_to', 'other')"
+          amount:
+            type: REAL
+            description: "Dollar amount if applicable (donations, contracts)"
+          period:
+            type: TEXT
+            description: "Time period (e.g., '2024', '2023-Q3')"
+          source:
+            type: TEXT
+            description: "Data source (e.g., 'FEC', 'SEC', 'OpenSecrets')"
+          confidence:
+            type: REAL
+            default: 0.5
+          metadata:
+            type: TEXT
+            description: "JSON blob with source-specific details"
+          created_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+        indexes:
+          - name: idx_rel_source
+            columns: [source_entity_id]
+          - name: idx_rel_target
+            columns: [target_entity_id]
+          - name: idx_rel_type
+            columns: [type]
+
+      # -----------------------------------------------------------------------
+      # Investigation tracking
+      # -----------------------------------------------------------------------
+
+      investigations:
+        description: "Active investigation threads"
+        columns:
+          id:
+            type: TEXT
+            primary_key: true
+          title:
+            type: TEXT
+            not_null: true
+          description:
+            type: TEXT
+          status:
+            type: TEXT
+            not_null: true
+            default: "'active'"
+            check: "status IN ('active', 'paused', 'completed', 'archived')"
+          priority:
+            type: INTEGER
+            default: 5
+            check: "priority >= 1 AND priority <= 10"
+          entity_ids:
+            type: TEXT
+            description: "JSON array of related entity IDs"
+          findings:
+            type: TEXT
+            description: "JSON array of findings"
+          created_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+          updated_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+        indexes:
+          - name: idx_inv_status
+            columns: [status]
+
+      # -----------------------------------------------------------------------
+      # Document and evidence storage (metadata — files in R2)
+      # -----------------------------------------------------------------------
+
+      documents:
+        description: "Document metadata — actual files stored in R2 MEDIA bucket"
+        columns:
+          id:
+            type: TEXT
+            primary_key: true
+          title:
+            type: TEXT
+            not_null: true
+          type:
+            type: TEXT
+            not_null: true
+            check: "type IN ('filing', 'foia_response', 'article', 'report', 'tip', 'attachment', 'generated', 'other')"
+          r2_key:
+            type: TEXT
+            description: "R2 object key for the actual file"
+          mime_type:
+            type: TEXT
+          size_bytes:
+            type: INTEGER
+          source_url:
+            type: TEXT
+          entity_ids:
+            type: TEXT
+            description: "JSON array of related entity IDs"
+          investigation_id:
+            type: TEXT
+            foreign_key: "investigations(id)"
+          summary:
+            type: TEXT
+            description: "AI-generated summary"
+          embedding_id:
+            type: TEXT
+            description: "Vectorize embedding ID for semantic search"
+          created_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+        indexes:
+          - name: idx_doc_type
+            columns: [type]
+          - name: idx_doc_investigation
+            columns: [investigation_id]
+
+      # -----------------------------------------------------------------------
+      # Tips and submissions
+      # -----------------------------------------------------------------------
+
+      tips:
+        description: "Anonymous tips and whistleblower submissions"
+        columns:
+          id:
+            type: TEXT
+            primary_key: true
+          tracking_id:
+            type: TEXT
+            not_null: true
+            unique: true
+            description: "Public tracking ID for tip status"
+          status:
+            type: TEXT
+            not_null: true
+            default: "'received'"
+            check: "status IN ('received', 'triaged', 'investigating', 'actionable', 'archived')"
+          urgency:
+            type: TEXT
+            default: "'normal'"
+            check: "urgency IN ('low', 'normal', 'high', 'critical')"
+          category:
+            type: TEXT
+          summary:
+            type: TEXT
+            description: "AI-classified summary (never contains raw tip text)"
+          investigation_id:
+            type: TEXT
+            foreign_key: "investigations(id)"
+          sender_hash:
+            type: TEXT
+            description: "SHA-256 hash of sender identity (privacy protection)"
+          received_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+          triaged_at:
+            type: TEXT
+        indexes:
+          - name: idx_tips_tracking
+            columns: [tracking_id]
+          - name: idx_tips_status
+            columns: [status]
+          - name: idx_tips_urgency
+            columns: [urgency]
+
+      # -----------------------------------------------------------------------
+      # FOIA tracking
+      # -----------------------------------------------------------------------
+
+      foia_requests:
+        description: "FOIA request tracking — filed, pending, received, appealed"
+        columns:
+          id:
+            type: TEXT
+            primary_key: true
+          agency:
+            type: TEXT
+            not_null: true
+          topic:
+            type: TEXT
+            not_null: true
+          status:
+            type: TEXT
+            not_null: true
+            default: "'drafted'"
+            check: "status IN ('drafted', 'filed', 'acknowledged', 'processing', 'partial_response', 'completed', 'denied', 'appealed')"
+          muckrock_id:
+            type: TEXT
+            description: "MuckRock request ID if filed through MuckRock"
+          filed_at:
+            type: TEXT
+          response_due:
+            type: TEXT
+          response_received:
+            type: TEXT
+          document_ids:
+            type: TEXT
+            description: "JSON array of document IDs for responses"
+          investigation_id:
+            type: TEXT
+            foreign_key: "investigations(id)"
+          created_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+        indexes:
+          - name: idx_foia_status
+            columns: [status]
+          - name: idx_foia_agency
+            columns: [agency]
+
+      # -----------------------------------------------------------------------
+      # Content tracking
+      # -----------------------------------------------------------------------
+
+      content:
+        description: "Generated and published content"
+        columns:
+          id:
+            type: TEXT
+            primary_key: true
+          type:
+            type: TEXT
+            not_null: true
+            check: "type IN ('post', 'thread', 'article', 'digest', 'satire', 'visualization', 'poem', 'legal_doc')"
+          title:
+            type: TEXT
+          body:
+            type: TEXT
+          investigation_id:
+            type: TEXT
+            foreign_key: "investigations(id)"
+          plugin:
+            type: TEXT
+            description: "Plugin that generated this content"
+          platform:
+            type: TEXT
+            description: "Target distribution platform"
+          published_url:
+            type: TEXT
+          published_at:
+            type: TEXT
+          created_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+        indexes:
+          - name: idx_content_type
+            columns: [type]
+          - name: idx_content_investigation
+            columns: [investigation_id]
+
+  # =============================================================================
+  # Database: fire-relay (bound as RELAY_DB in fire-relay)
+  # =============================================================================
+
+  fire-relay:
+    binding: RELAY_DB
+    worker: fire-relay
+    description: "Federation relay append-only event log"
+
+    tables:
+
+      relay_events:
+        description: "Append-only log of relay events for transparency"
+        columns:
+          id:
+            type: INTEGER
+            primary_key: true
+            autoincrement: true
+          event_type:
+            type: TEXT
+            not_null: true
+            check: "event_type IN ('register', 'deregister', 'heartbeat', 'relay', 'error')"
+          node_id:
+            type: TEXT
+          node_endpoint:
+            type: TEXT
+          source_ip_hash:
+            type: TEXT
+            description: "SHA-256 hash of source IP (privacy)"
+          payload_hash:
+            type: TEXT
+            description: "SHA-256 hash of event payload"
+          timestamp:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+        indexes:
+          - name: idx_relay_type
+            columns: [event_type]
+          - name: idx_relay_node
+            columns: [node_id]
+          - name: idx_relay_time
+            columns: [timestamp]
+
+      registered_nodes:
+        description: "Currently registered federation nodes"
+        columns:
+          node_id:
+            type: TEXT
+            primary_key: true
+          endpoint:
+            type: TEXT
+            not_null: true
+          capabilities:
+            type: TEXT
+            description: "JSON array of node capabilities"
+          version:
+            type: TEXT
+          last_seen:
+            type: TEXT
+            not_null: true
+          registered_at:
+            type: TEXT
+            not_null: true
+            default: "CURRENT_TIMESTAMP"
+        indexes:
+          - name: idx_nodes_last_seen
+            columns: [last_seen]

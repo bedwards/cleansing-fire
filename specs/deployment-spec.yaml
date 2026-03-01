@@ -1,0 +1,192 @@
+# =============================================================================
+# Deployment Specification — Cleansing Fire
+# =============================================================================
+# Machine-readable definition of all deployment targets, their configurations,
+# bindings, and relationships.
+#
+# For humans: see docs/cloudflare-implementation.md, docs/zero-touch-bootstrap.md
+# For agents: use this file to understand what's deployed where
+# =============================================================================
+
+metadata:
+  version: "0.1.0"
+  updated: "2026-02-28"
+  description: "Deployment targets, configurations, and infrastructure bindings"
+  human_docs:
+    - path: "docs/cloudflare-implementation.md"
+      description: "Full Cloudflare architecture and cost analysis"
+    - path: "docs/zero-touch-bootstrap.md"
+      description: "One-command node deployment"
+    - path: "docs/global-architecture.md"
+      description: "Planetary-scale deployment architecture"
+
+# =============================================================================
+# GitHub Pages — Static site
+# =============================================================================
+
+github_pages:
+  source:
+    branch: main
+    directory: "docs/"
+  url: "https://bedwards.github.io/cleansing-fire"
+  deployment:
+    trigger: push to main (automatic)
+    workflow: null  # GitHub Pages built-in
+  content:
+    - "docs/index.html"        # Split landing page (human + AI)
+    - "docs/humans.html"       # Human portal
+    - "docs/agents.html"       # AI agent portal
+    - "docs/*.md"              # Research documents (26+)
+
+# =============================================================================
+# Cloudflare Workers — Edge compute
+# =============================================================================
+
+cloudflare:
+  deployment:
+    workflow: ".github/workflows/deploy-workers.yml"
+    trigger: "push to main when edge/ changes"
+    tool: "wrangler"
+    node_version: "22"
+    required_secrets:
+      - CLOUDFLARE_API_TOKEN
+      - CLOUDFLARE_ACCOUNT_ID
+
+  # ---------------------------------------------------------------------------
+  workers:
+
+    fire-ai:
+      path: "edge/fire-ai/"
+      description: "Workers AI inference — analysis, embeddings, summarization, classification"
+      compatibility_date: "2026-02-24"
+      deploy_order: 1  # Must deploy before fire-api (service binding dependency)
+      bindings:
+        ai:
+          binding: AI
+          description: "Workers AI models"
+      models_used:
+        - "@cf/meta/llama-3.3-70b-instruct-fp8-fast"  # Deep analysis
+        - "@cf/google/gemma-3-12b-it"                   # Lightweight tasks
+        - "@cf/baai/bge-large-en-v1.5"                  # Embeddings
+
+    fire-api:
+      path: "edge/fire-api/"
+      description: "REST API gateway — investigations, queries, content management"
+      compatibility_date: "2026-02-24"
+      deploy_order: 2  # After fire-ai
+      bindings:
+        kv:
+          - binding: CACHE
+            namespace: "fire-cache"
+            description: "Response cache, content fragments, config"
+        d1:
+          - binding: CIVIC_DB
+            database: "civic-data"
+            description: "Structured civic data — entities, relationships, investigations"
+        r2:
+          - binding: MEDIA
+            bucket: "fire-media"
+            description: "Documents, images, PDFs, generated media"
+        services:
+          - binding: FIRE_AI
+            service: "fire-ai"
+            description: "Internal binding to AI worker (zero-latency)"
+        queues:
+          - binding: TASK_QUEUE
+            queue: "fire-task-queue"
+            description: "Async task dispatch"
+      endpoints:
+        - "GET  /health"
+        - "GET  /api/v1/investigations"
+        - "POST /api/v1/investigations"
+        - "GET  /api/v1/entities/:id"
+        - "GET  /api/v1/search"
+
+    fire-markdown:
+      path: "edge/fire-markdown/"
+      description: "LLM-accessible markdown proxy — content negotiation for AI agents"
+      compatibility_date: "2026-02-24"
+      deploy_order: 3  # Independent
+      bindings: {}  # Stateless proxy
+      vars:
+        ORIGIN: "https://bedwards.github.io/cleansing-fire"
+      conventions:
+        - "Accept: text/markdown header"
+        - "?format=md query parameter"
+        - "/llms.txt (llmstxt.org standard)"
+        - "/llms-full.txt (expanded)"
+
+    fire-relay:
+      path: "edge/fire-relay/"
+      description: "Federation bootstrap relay — node registration, peer discovery"
+      compatibility_date: "2026-02-24"
+      deploy_order: 3  # Independent
+      bindings:
+        kv:
+          - binding: NODES
+            namespace: "fire-relay-nodes"
+            description: "Node registry with TTL-based expiration"
+          - binding: CONFIG
+            namespace: "fire-relay-config"
+            description: "Relay configuration, rate limits, blocklists"
+        d1:
+          - binding: RELAY_DB
+            database: "fire-relay"
+            description: "Append-only federation event log"
+        services:
+          - binding: FIRE_AI
+            service: "fire-ai"
+            description: "AI verification of node registrations"
+
+# =============================================================================
+# Local Services — Per-node daemons
+# =============================================================================
+
+local_services:
+  gatekeeper:
+    path: "daemon/gatekeeper.py"
+    port: 7800
+    description: "HTTP server serializing GPU access to local Ollama"
+    queue_size: 5
+    default_model: "mistral-large:123b"
+    endpoints:
+      - "POST /submit"
+      - "POST /submit-sync"
+      - "GET  /task/{id}"
+      - "GET  /health"
+    control: "scripts/gatekeeper-ctl.sh"
+
+  firewire:
+    path: "daemon/firewire.py"
+    port: 7801
+    description: "Federation protocol daemon — Ed25519 signing, gossip, peer discovery"
+    control: "scripts/firewire-ctl.sh"
+
+  scheduler:
+    path: "scheduler/scheduler.py"
+    port: 7802
+    description: "Autonomous operation loop — 25 tasks across 6 categories"
+    control: "scripts/scheduler-ctl.sh"
+    categories: [sense, analyze, create, distribute, improve, system]
+
+# =============================================================================
+# CI/CD Pipeline
+# =============================================================================
+
+ci:
+  workflow: ".github/workflows/ci.yml"
+  trigger: "PRs and pushes to main"
+  jobs:
+    - name: lint
+      tools: [shellcheck, yamllint, py_compile]
+    - name: security
+      checks: [secret_patterns, dangerous_files, env_tracking]
+    - name: test
+      script: "scripts/test-plugins.sh"
+    - name: integrity
+      checks: [critical_files, license, principles, manifest_hashes]
+
+  review:
+    workflow: ".github/workflows/claude-review.yml"
+    trigger: "PRs"
+    model: "claude-opus-4-6"
