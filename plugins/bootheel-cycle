@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Bootheel Cycle Detector
+
+Early-warning system for economic capture cycles — the repeating pattern
+where corporate interests capture local economies, extract value, and
+leave communities dependent. Named after Missouri's Bootheel region,
+where cotton monoculture created a century-long dependency cycle.
+
+The Cycle Pattern:
+  1. ENTRY: Corporation enters market with capital & jobs
+  2. DEPENDENCY: Local economy restructures around corporate presence
+  3. EXTRACTION: Value flows out (profits, tax breaks, regulatory capture)
+  4. ABANDONMENT: Corporation leaves when incentives expire or costs rise
+  5. DEVASTATION: Community left with no tax base, no jobs, polluted land
+  6. REPEAT: New corporation arrives with same promises
+
+Input JSON:
+  {"action": "detect", "region": "St Louis, MO", "industry": "tech"}
+  {"action": "indicators", "company": "Amazon", "region": "St Louis, MO"}
+  {"action": "tax_incentive_analysis", "region": "Missouri", "years": 10}
+  {"action": "dependency_score", "region": "Bootheel, MO"}
+  {"action": "historical", "region": "Gary, IN"}
+  {"action": "help"}
+
+Output JSON: varies by action
+"""
+
+import json
+import os
+import sys
+
+GATEKEEPER_URL = os.environ.get("CF_GATEKEEPER_URL", "http://127.0.0.1:7800")
+TEST_MODE = os.environ.get("CF_TEST_MODE") == "1"
+
+# Capture cycle indicators — red flags that suggest economic capture
+CAPTURE_INDICATORS = {
+    "tax_incentives": {
+        "description": "Tax abatements, TIF districts, enterprise zones offered to corporation",
+        "weight": 0.15,
+        "data_sources": ["state economic development agencies", "TIF commission records",
+                         "municipal ordinances", "USASpending.gov"],
+    },
+    "single_employer_dominance": {
+        "description": "One employer accounts for >15% of local employment",
+        "weight": 0.20,
+        "data_sources": ["BLS QCEW data", "Census County Business Patterns"],
+    },
+    "regulatory_capture": {
+        "description": "Former corporate executives in regulatory positions",
+        "weight": 0.15,
+        "data_sources": ["lobby-tracker plugin", "revolving door records"],
+    },
+    "infrastructure_dependency": {
+        "description": "Public infrastructure built primarily to serve one corporation",
+        "weight": 0.10,
+        "data_sources": ["municipal budget documents", "bond issuances"],
+    },
+    "wage_suppression": {
+        "description": "Wages below regional average despite economic indicators",
+        "weight": 0.10,
+        "data_sources": ["BLS wage data", "living wage calculators"],
+    },
+    "environmental_burden": {
+        "description": "Disproportionate pollution burden on community",
+        "weight": 0.10,
+        "data_sources": ["EPA TRI data", "EJScreen", "state DEQ records"],
+    },
+    "political_spending": {
+        "description": "Corporate political spending targeting local/state officials",
+        "weight": 0.10,
+        "data_sources": ["fec-analysis plugin", "state campaign finance records"],
+    },
+    "community_displacement": {
+        "description": "Rising rents/property values pushing out long-term residents",
+        "weight": 0.10,
+        "data_sources": ["Census ACS data", "property-records plugin", "eviction records"],
+    },
+}
+
+# Historical case studies for pattern matching
+CASE_STUDIES = {
+    "gary_in": {
+        "region": "Gary, Indiana",
+        "corporation": "US Steel",
+        "industry": "steel",
+        "cycle_duration": "1906-1980s",
+        "peak_population": 178320,
+        "current_population": 69093,
+        "pattern": "Classic company town → deindustrialization → urban decay",
+        "lessons": ["Single-industry dependency is existential risk",
+                     "Tax base collapse follows corporate departure",
+                     "Environmental legacy lasts generations"],
+    },
+    "flint_mi": {
+        "region": "Flint, Michigan",
+        "corporation": "General Motors",
+        "industry": "automotive",
+        "cycle_duration": "1908-1990s",
+        "peak_population": 196940,
+        "current_population": 87092,
+        "pattern": "Auto industry capture → offshoring → infrastructure collapse",
+        "lessons": ["Corporate departure triggers cascading infrastructure failure",
+                     "Water crisis was downstream effect of economic capture",
+                     "Recovery requires breaking the dependency pattern"],
+    },
+    "bootheel_mo": {
+        "region": "Missouri Bootheel",
+        "corporation": "Cotton industry (multiple)",
+        "industry": "agriculture",
+        "cycle_duration": "1870s-present",
+        "pattern": "Plantation monoculture → sharecropping → mechanization → poverty",
+        "lessons": ["Monoculture creates permanent dependency",
+                     "Racial exploitation amplifies economic extraction",
+                     "Geographic isolation compounds recovery difficulty"],
+    },
+    "amazon_hq2": {
+        "region": "Multiple cities (2017-2018 bidding war)",
+        "corporation": "Amazon",
+        "industry": "tech",
+        "cycle_duration": "2017-2018 (bidding process)",
+        "pattern": "Cities competed to offer massive incentives for HQ2",
+        "lessons": ["Corporate leverage over municipalities creates race to bottom",
+                     "Incentive bidding wars transfer public wealth to shareholders",
+                     "Transparency about true costs can break the cycle"],
+    },
+}
+
+
+def ask_gatekeeper(prompt):
+    """Submit analysis prompt to gatekeeper."""
+    if TEST_MODE:
+        return "[Test mode: economic cycle analysis would be generated here]"
+    payload = {
+        "prompt": prompt,
+        "system": "You are an economic analyst specializing in economic capture, rent-seeking, "
+                  "and corporate-community power dynamics. Analyze patterns of extraction "
+                  "and dependency. Use concrete economic data and historical parallels.",
+        "caller": "plugin:bootheel-cycle",
+        "temperature": 0.3,
+        "max_tokens": 2048,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    import urllib.request
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return body.get("result", "") if body.get("status") == "completed" else None
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+
+def detect(region, industry=None):
+    """Detect potential economic capture cycles in a region."""
+    if TEST_MODE:
+        scores = {
+            "tax_incentives": 0.8, "single_employer_dominance": 0.6,
+            "regulatory_capture": 0.4, "infrastructure_dependency": 0.7,
+            "wage_suppression": 0.5, "environmental_burden": 0.3,
+            "political_spending": 0.6, "community_displacement": 0.4,
+        }
+        overall = sum(scores[k] * CAPTURE_INDICATORS[k]["weight"]
+                       for k in scores) / sum(v["weight"] for v in CAPTURE_INDICATORS.values())
+    else:
+        scores = {k: 0.0 for k in CAPTURE_INDICATORS}
+        overall = 0.0
+
+    # Determine risk level
+    if overall >= 0.7:
+        risk = "CRITICAL"
+    elif overall >= 0.5:
+        risk = "HIGH"
+    elif overall >= 0.3:
+        risk = "MODERATE"
+    else:
+        risk = "LOW"
+
+    analysis = ask_gatekeeper(
+        f"Analyze {region} for economic capture cycle indicators. "
+        f"Industry focus: {industry or 'all'}. "
+        f"Indicator scores: {json.dumps(scores)}. Overall: {overall:.2f}. "
+        f"What historical parallels exist? What stage of the capture cycle "
+        f"is this region likely in?"
+    )
+
+    return {
+        "region": region,
+        "industry": industry,
+        "capture_risk": risk,
+        "overall_score": round(overall, 3),
+        "indicators": {k: {"score": scores[k], **CAPTURE_INDICATORS[k]}
+                       for k in CAPTURE_INDICATORS},
+        "ai_analysis": analysis,
+    }
+
+
+def indicators(company, region):
+    """Evaluate specific capture indicators for a company-region pair."""
+    if TEST_MODE:
+        return {
+            "company": company,
+            "region": region,
+            "indicators": {
+                "tax_incentives_received": {
+                    "total": 45000000, "duration_years": 15,
+                    "cost_per_job": 150000, "claw_back_provisions": False,
+                },
+                "employment_share": {
+                    "direct_jobs": 3500, "regional_employment": 45000,
+                    "share": 0.078, "threshold": 0.15, "at_risk": False,
+                },
+                "political_influence": {
+                    "local_donations": 250000, "state_donations": 1200000,
+                    "lobbying_spend": 800000, "revolving_door_count": 3,
+                },
+                "environmental_impact": {
+                    "permits": 12, "violations": 4, "fines_total": 125000,
+                    "community_complaints": 47,
+                },
+            },
+        }
+    return {"error": "Production analysis requires data API integration"}
+
+
+def tax_incentive_analysis(region, years=10):
+    """Analyze tax incentive deals in a region over time."""
+    if TEST_MODE:
+        return {
+            "region": region,
+            "analysis_period": f"Last {years} years",
+            "total_incentives_granted": 340000000,
+            "top_recipients": [
+                {"company": "MegaCorp", "amount": 95000000, "type": "TIF",
+                 "jobs_promised": 2000, "jobs_delivered": 1350, "cost_per_job": 70370},
+                {"company": "TechGiant Inc", "amount": 75000000, "type": "Enterprise Zone",
+                 "jobs_promised": 1500, "jobs_delivered": 800, "cost_per_job": 93750},
+                {"company": "Big Retailer", "amount": 45000000, "type": "Tax Abatement",
+                 "jobs_promised": 500, "jobs_delivered": 450, "cost_per_job": 100000},
+            ],
+            "job_delivery_rate": 0.65,
+            "average_cost_per_job": 85000,
+            "claw_back_provisions_present": 0.20,
+        }
+    return {"error": "Production analysis requires municipal records API"}
+
+
+def dependency_score(region):
+    """Calculate overall economic dependency score for a region."""
+    if TEST_MODE:
+        return {
+            "region": region,
+            "dependency_score": 0.72,
+            "risk_level": "HIGH",
+            "factors": {
+                "employer_concentration": {"score": 0.65, "top_employer_share": 0.18},
+                "industry_diversification": {"score": 0.45, "herfindahl_index": 0.23},
+                "tax_base_concentration": {"score": 0.80, "top_taxpayer_share": 0.25},
+                "wage_dependency": {"score": 0.58, "median_wage_ratio": 0.85},
+                "infrastructure_lock_in": {"score": 0.70, "single_use_percentage": 0.40},
+            },
+            "comparable_regions": [
+                {"name": "Gary, IN (1970)", "score": 0.91, "outcome": "Urban decline"},
+                {"name": "Austin, TX (2020)", "score": 0.35, "outcome": "Diversified growth"},
+            ],
+        }
+    return {"error": "Production scoring requires BLS/Census data"}
+
+
+def historical(region):
+    """Return historical case study for a region or similar pattern."""
+    region_lower = region.lower().replace(",", "").replace(" ", "_")
+    for key, study in CASE_STUDIES.items():
+        if key in region_lower or any(
+            word in region_lower for word in study["region"].lower().split()
+        ):
+            return {"case_study": study, "matched_key": key}
+
+    # No exact match — return all case studies for reference
+    return {
+        "message": f"No specific case study for '{region}'",
+        "available_case_studies": {k: v["region"] for k, v in CASE_STUDIES.items()},
+        "recommendation": "Use 'detect' action with this region for current analysis",
+    }
+
+
+def help_action():
+    """Return available actions."""
+    return {
+        "plugin": "bootheel-cycle",
+        "description": "Economic capture early-warning system",
+        "actions": {
+            "detect": "Detect capture cycle indicators in a region",
+            "indicators": "Evaluate specific indicators for a company-region pair",
+            "tax_incentive_analysis": "Analyze tax incentive deals over time",
+            "dependency_score": "Calculate economic dependency score",
+            "historical": "Get historical case study for pattern matching",
+            "help": "Show this help",
+        },
+        "indicator_count": len(CAPTURE_INDICATORS),
+        "case_study_count": len(CASE_STUDIES),
+    }
+
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "help")
+    actions = {
+        "detect": lambda: detect(input_data.get("region", ""), input_data.get("industry")),
+        "indicators": lambda: indicators(input_data.get("company", ""), input_data.get("region", "")),
+        "tax_incentive_analysis": lambda: tax_incentive_analysis(
+            input_data.get("region", ""), input_data.get("years", 10)),
+        "dependency_score": lambda: dependency_score(input_data.get("region", "")),
+        "historical": lambda: historical(input_data.get("region", "")),
+        "help": help_action,
+    }
+
+    result = actions.get(action, lambda: {"error": f"Unknown action: {action}"})()
+    json.dump(result, sys.stdout, indent=2)
+    print()
+    if isinstance(result, dict) and result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
