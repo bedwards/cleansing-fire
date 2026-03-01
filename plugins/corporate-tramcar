@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Corporate Tramcar Generator
+
+Generates satirical corporate euphemism translations and "Corporate Tramcar"
+content — named after the phenomenon where corporations use the language of
+progress ("innovation", "disruption", "stakeholder value") to advance
+extraction. The tramcar runs on a fixed track but pretends freedom.
+
+Input JSON:
+  {"action": "translate", "text": "We're rightsizing our workforce to optimize shareholder value"}
+  {"action": "generate", "company": "Acme Corp", "scandal": "dumped waste in river"}
+  {"action": "bingo", "industry": "tech"}
+  {"action": "press_release", "company": "MegaCorp", "bad_thing": "fired 10000 workers"}
+  {"action": "decoder", "url": "https://example.com/corporate-statement"}
+  {"action": "help"}
+
+Output JSON: varies by action
+
+This plugin uses gatekeeper for AI-powered satire generation.
+"""
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+GATEKEEPER_URL = os.environ.get("CF_GATEKEEPER_URL", "http://127.0.0.1:7800")
+TEST_MODE = os.environ.get("CF_TEST_MODE") == "1"
+
+# The Corporate Euphemism Dictionary — a living document
+EUPHEMISM_DICT = {
+    "rightsizing": "mass layoffs",
+    "workforce optimization": "firing people",
+    "strategic realignment": "we screwed up and need to cut costs",
+    "synergy capture": "merging departments and firing the redundant humans",
+    "stakeholder value": "stock price (shareholders only, not actual stakeholders)",
+    "innovation hub": "open-plan office where nobody can concentrate",
+    "disruption": "doing what already exists but with an app and fewer labor protections",
+    "pivot": "our original idea failed",
+    "leverage": "exploit",
+    "unlock value": "sell something that was working fine",
+    "going forward": "let's never speak of this again",
+    "learnings": "mistakes we refuse to call mistakes",
+    "alignment": "everyone must agree with the CEO",
+    "best practices": "what everyone else does so we can't be blamed",
+    "thought leadership": "content marketing pretending to be wisdom",
+    "sustainability initiative": "green-colored press release",
+    "corporate social responsibility": "the minimum we can do to prevent regulation",
+    "empowerment": "responsibility without authority or raise",
+    "agile transformation": "meetings about reducing meetings",
+    "paradigm shift": "we changed the org chart",
+    "value proposition": "the thing we're selling",
+    "deep dive": "a meeting about having a meeting",
+    "circle back": "I'm ignoring this until you forget",
+    "take this offline": "stop embarrassing me in this meeting",
+    "move the needle": "do something measurable for once",
+    "bandwidth": "time, which we refuse to acknowledge is finite",
+    "low-hanging fruit": "the easy stuff we should have done months ago",
+    "voluntary separation": "coerced resignation",
+    "operational efficiency": "doing more with fewer people",
+    "right-shoring": "moving jobs to wherever labor is cheapest",
+    "human capital": "people (but objectified)",
+    "talent acquisition": "hiring (but make it sound scientific)",
+    "culture fit": "we only hire people who look/think like us",
+}
+
+# Bingo cards by industry
+BINGO_CARDS = {
+    "tech": [
+        "AI-powered", "blockchain-enabled", "disruptive", "scalable", "ecosystem",
+        "10x engineer", "move fast", "break things", "democratize", "leverage",
+        "mission-driven", "world-changing", "paradigm shift", "platform", "iterate",
+        "unicorn", "moonshot", "first principles", "growth hacking", "pivot",
+        "thought leader", "evangelist", "ninja", "rockstar", "guru",
+    ],
+    "finance": [
+        "synergies", "shareholder value", "alpha", "hedging", "risk-adjusted",
+        "mark to market", "restructuring", "deleveraging", "yield optimization",
+        "capital deployment", "value creation", "strategic alternatives", "accretive",
+        "basis points", "liquidity event", "skin in the game", "upside potential",
+        "regulatory arbitrage", "offshore vehicle", "special purpose entity",
+        "fiduciary duty", "materiality threshold", "going concern", "goodwill impairment",
+        "credit enhancement",
+    ],
+    "pharma": [
+        "patient-centric", "breakthrough therapy", "precision medicine", "pipeline",
+        "lifecycle management", "compassionate use", "real-world evidence",
+        "innovative pricing", "value-based care", "unmet medical need",
+        "orphan indication", "companion diagnostic", "formulary access",
+        "health economics", "treatment paradigm", "clinical pathway",
+        "risk-benefit profile", "post-market surveillance", "label expansion",
+        "biosimilar competition", "market exclusivity", "patent cliff",
+        "co-pay assistance", "patient assistance program", "access program",
+    ],
+    "energy": [
+        "energy transition", "net zero", "carbon neutral", "clean energy",
+        "sustainable development", "responsible sourcing", "stakeholder engagement",
+        "community investment", "environmental stewardship", "reclamation",
+        "baseline emissions", "offset credits", "scope 3", "circular economy",
+        "just transition", "decarbonization pathway", "renewable portfolio",
+        "decommissioning", "remediation", "legacy assets", "stranded assets",
+        "operational excellence", "safety culture", "spill response", "flaring reduction",
+    ],
+}
+
+
+def ask_gatekeeper(prompt, system=None):
+    """Submit analysis prompt to gatekeeper."""
+    if TEST_MODE:
+        return "[Test mode: satirical content would be generated here]"
+    payload = {
+        "prompt": prompt,
+        "system": system or (
+            "You are the Corporate Tramcar Generator — a satirical translator that "
+            "decodes corporate euphemisms and generates biting parody of corporate "
+            "communications. You are funny, precise, and ruthless in exposing how "
+            "language is used to disguise harm. Channel George Carlin, Molly Ivins, "
+            "and The Onion. Always punch up, never down."
+        ),
+        "caller": "plugin:corporate-tramcar",
+        "temperature": 0.8,
+        "max_tokens": 2048,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return body.get("result", "") if body.get("status") == "completed" else None
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+
+def translate(text):
+    """Translate corporate euphemisms to plain language."""
+    translations = []
+    text_lower = text.lower()
+    for euphemism, meaning in EUPHEMISM_DICT.items():
+        if euphemism in text_lower:
+            translations.append({
+                "euphemism": euphemism,
+                "translation": meaning,
+            })
+
+    # AI-powered full translation
+    ai_translation = ask_gatekeeper(
+        f"Translate this corporate statement into honest English. "
+        f"Keep the same structure but replace every euphemism with what it actually means. "
+        f"Add [TRANSLATION NOTE] annotations for particularly egregious euphemisms.\n\n"
+        f"Original: \"{text}\""
+    )
+
+    return {
+        "original": text,
+        "euphemisms_detected": translations,
+        "euphemism_count": len(translations),
+        "plain_language": ai_translation,
+    }
+
+
+def generate(company, scandal):
+    """Generate a satirical corporate response to a scandal."""
+    ai_response = ask_gatekeeper(
+        f"Generate a satirical corporate press release from {company} responding to: "
+        f"\"{scandal}\". The press release should:\n"
+        f"1. Use maximum corporate euphemism\n"
+        f"2. Somehow blame the victims\n"
+        f"3. Promise a 'task force' or 'committee'\n"
+        f"4. Mention 'stakeholder value' at least once\n"
+        f"5. Include a fake quote from a VP of Corporate Responsibility\n"
+        f"6. End with a completely unrelated CSR achievement\n\n"
+        f"Make it biting satire that exposes how corporations actually communicate."
+    )
+
+    return {
+        "company": company,
+        "scandal": scandal,
+        "satirical_response": ai_response,
+        "dictionary_entries_used": [k for k in EUPHEMISM_DICT.keys()],
+    }
+
+
+def bingo(industry):
+    """Generate a corporate buzzword bingo card for an industry."""
+    industry = industry.lower()
+    if industry not in BINGO_CARDS:
+        return {
+            "error": f"Unknown industry: {industry}",
+            "available_industries": list(BINGO_CARDS.keys()),
+        }
+
+    words = BINGO_CARDS[industry]
+    # Create 5x5 bingo card
+    import random
+    random.seed(hash(industry + str(len(words))))
+    selected = random.sample(words, min(25, len(words)))
+    if len(selected) >= 13:
+        selected[12] = "FREE SPACE (executives taking credit)"
+
+    card = []
+    for i in range(0, min(25, len(selected)), 5):
+        card.append(selected[i:i+5])
+
+    return {
+        "industry": industry,
+        "card": card,
+        "instructions": "Cross off each square when you hear the phrase in a meeting, "
+                       "earnings call, or press release. First to get 5 in a row wins "
+                       "a deepening sense of existential dread.",
+    }
+
+
+def press_release(company, bad_thing):
+    """Generate a parody press release about something bad with maximum spin."""
+    ai_release = ask_gatekeeper(
+        f"Write a parody corporate press release from {company} about: \"{bad_thing}\"\n\n"
+        f"Format it like a real press release with:\n"
+        f"- A headline that spins the bad thing as positive\n"
+        f"- FOR IMMEDIATE RELEASE header\n"
+        f"- Location and date line\n"
+        f"- Body paragraphs with escalating absurdity\n"
+        f"- Quote from CEO that says nothing meaningful\n"
+        f"- Quote from Chief People Officer showing zero empathy\n"
+        f"- A forward-looking statements disclaimer that's oddly specific\n"
+        f"- Boilerplate 'About {company}' section that contradicts the news\n\n"
+        f"Make each paragraph funnier than the last while staying disturbingly realistic."
+    )
+
+    return {
+        "company": company,
+        "actual_event": bad_thing,
+        "press_release": ai_release,
+        "disclaimer": "This is satire generated by the Corporate Tramcar Generator. "
+                      "Any resemblance to actual corporate communications is "
+                      "entirely intentional and deeply concerning.",
+    }
+
+
+def decoder(url):
+    """Decode a real corporate statement from a URL."""
+    if TEST_MODE:
+        # Use a sample corporate statement for testing
+        sample = (
+            "We are taking decisive action to ensure our organization is well-positioned "
+            "for sustainable, long-term growth. As part of this strategic transformation, "
+            "we are making the difficult decision to reduce our global workforce by "
+            "approximately 12,000 positions. These changes will help us invest in the "
+            "areas that matter most to our customers while improving operational efficiency."
+        )
+        return translate(sample)
+
+    # In production: fetch URL content and translate
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "CleansingFire/0.1"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+        # Simple text extraction (strip HTML tags)
+        import re
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()[:2000]
+        return translate(text)
+    except Exception as e:
+        return {"error": f"Failed to fetch URL: {e}"}
+
+
+def help_action():
+    """Return available actions and usage."""
+    return {
+        "plugin": "corporate-tramcar",
+        "description": "Generates satirical translations of corporate euphemisms and parody press releases",
+        "actions": {
+            "translate": "Translate corporate text to plain language",
+            "generate": "Generate satirical corporate response to a scandal",
+            "bingo": "Generate buzzword bingo card for an industry",
+            "press_release": "Generate parody press release",
+            "decoder": "Decode corporate statement from a URL",
+            "help": "Show this help",
+        },
+        "euphemism_count": len(EUPHEMISM_DICT),
+        "industries": list(BINGO_CARDS.keys()),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "help")
+
+    if action == "translate":
+        result = translate(input_data.get("text", ""))
+    elif action == "generate":
+        result = generate(input_data.get("company", ""), input_data.get("scandal", ""))
+    elif action == "bingo":
+        result = bingo(input_data.get("industry", "tech"))
+    elif action == "press_release":
+        result = press_release(input_data.get("company", ""), input_data.get("bad_thing", ""))
+    elif action == "decoder":
+        result = decoder(input_data.get("url", ""))
+    elif action == "help":
+        result = help_action()
+    else:
+        result = {"error": f"Unknown action: {action}", "hint": "Try {\"action\": \"help\"}"}
+
+    json.dump(result, sys.stdout, indent=2)
+    print()
+    if isinstance(result, dict) and result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
