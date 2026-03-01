@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""
+Cleansing Fire Plugin: Property Records & Land Ownership
+
+Investigates property ownership patterns, land holdings, and real estate
+connections to political power. Uses county assessor data, SEC filings,
+and corporate registry cross-references.
+
+Input JSON:
+  {"action": "search", "address": "123 Main St", "state": "MO"}
+  {"action": "owner_history", "parcel_id": "12-345-6789"}
+  {"action": "portfolio", "owner": "Acme Holdings LLC", "state": "MO"}
+  {"action": "shell_detection", "owner": "Mystery Corp LLC"}
+  {"action": "tax_analysis", "parcel_id": "12-345-6789"}
+  {"action": "concentration", "city": "St Louis", "state": "MO"}
+
+Output JSON: varies by action
+
+Note: Real implementation requires county-specific API integrations.
+This plugin provides the framework with test data and gatekeeper analysis.
+"""
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+import urllib.parse
+from collections import defaultdict
+
+GATEKEEPER_URL = os.environ.get("CF_GATEKEEPER_URL", "http://127.0.0.1:7800")
+TEST_MODE = os.environ.get("CF_TEST_MODE") == "1"
+
+
+def ask_gatekeeper(prompt):
+    """Submit analysis prompt to gatekeeper."""
+    if TEST_MODE:
+        return "[Test mode: AI analysis would be generated here]"
+    payload = {
+        "prompt": prompt,
+        "system": "You are a real estate investigator specializing in land ownership patterns, shell companies, and property-related corruption. Identify ownership concentration, tax avoidance, and conflicts of interest.",
+        "caller": "plugin:property-records",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 120,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GATEKEEPER_URL}/submit-sync",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+            return body.get("result", "") if body.get("status") == "completed" else None
+    except Exception:
+        return None
+
+
+def _test_data(action, params):
+    """Return synthetic test data for offline testing."""
+    if action == "search":
+        return {
+            "results": [{
+                "parcel_id": "12-345-6789",
+                "address": params.get("address", "123 Main St"),
+                "city": "St Louis",
+                "state": params.get("state", "MO"),
+                "owner": "SMITH FAMILY TRUST",
+                "assessed_value": 450000,
+                "market_value": 520000,
+                "property_type": "Commercial",
+                "acreage": 0.5,
+                "year_built": 1985,
+                "last_sale_date": "2019-03-15",
+                "last_sale_price": 380000,
+            }]
+        }
+    elif action == "owner_history":
+        return {
+            "parcel_id": params.get("parcel_id", "12-345-6789"),
+            "history": [
+                {"owner": "SMITH FAMILY TRUST", "acquired": "2019-03-15", "price": 380000,
+                 "transfer_type": "Warranty Deed"},
+                {"owner": "MEGACORP HOLDINGS LLC", "acquired": "2015-08-22", "price": 310000,
+                 "transfer_type": "Warranty Deed"},
+                {"owner": "CITY OF ST LOUIS", "acquired": "2010-01-01", "price": 0,
+                 "transfer_type": "Tax Sale"},
+                {"owner": "JOHNSON, ROBERT A", "acquired": "1998-06-12", "price": 185000,
+                 "transfer_type": "Warranty Deed"},
+            ]
+        }
+    elif action == "portfolio":
+        return {
+            "owner": params.get("owner", "Acme Holdings LLC"),
+            "properties": [
+                {"parcel_id": "12-345-6789", "address": "123 Main St", "value": 450000, "type": "Commercial"},
+                {"parcel_id": "12-345-6790", "address": "125 Main St", "value": 380000, "type": "Commercial"},
+                {"parcel_id": "22-100-0001", "address": "500 Oak Ave", "value": 1200000, "type": "Multi-Family"},
+                {"parcel_id": "33-200-0050", "address": "5th & Market", "value": 2800000, "type": "Vacant Lot"},
+            ],
+            "total_assessed_value": 4830000,
+            "property_count": 4,
+        }
+    elif action == "shell_detection":
+        return {
+            "entity": params.get("owner", "Mystery Corp LLC"),
+            "indicators": {
+                "registered_agent_is_attorney": True,
+                "no_physical_office": True,
+                "recently_formed": True,
+                "formation_date": "2023-11-01",
+                "formation_state": "Delaware",
+                "operating_state": "Missouri",
+                "linked_entities": ["Mystery Holdings Inc", "MystCo Management LLC"],
+                "common_agent": "Smith & Associates, Registered Agents Inc",
+            },
+            "shell_score": 0.78,
+            "risk_level": "high",
+        }
+    elif action == "tax_analysis":
+        return {
+            "parcel_id": params.get("parcel_id", "12-345-6789"),
+            "assessed_value": 450000,
+            "market_estimate": 650000,
+            "assessment_ratio": 0.69,
+            "tax_rate": 0.0612,
+            "annual_tax": 27540,
+            "abatements": [
+                {"type": "Chapter 353", "savings": 15000, "expires": "2028-12-31",
+                 "approving_body": "St Louis Board of Aldermen"},
+            ],
+            "comparable_properties": [
+                {"address": "127 Main St", "value": 480000, "assessment_ratio": 0.88},
+                {"address": "119 Main St", "value": 420000, "assessment_ratio": 0.91},
+            ],
+        }
+    elif action == "concentration":
+        return {
+            "area": f"{params.get('city', 'St Louis')}, {params.get('state', 'MO')}",
+            "top_owners": [
+                {"owner": "SMITH FAMILY TRUST", "properties": 47, "total_value": 18500000},
+                {"owner": "MEGACORP HOLDINGS LLC", "properties": 31, "total_value": 42000000},
+                {"owner": "ABC REAL ESTATE LP", "properties": 28, "total_value": 15200000},
+                {"owner": "CITY DEVELOPMENT CORP", "properties": 22, "total_value": 8900000},
+                {"owner": "FIRST NATIONAL BANK", "properties": 15, "total_value": 31000000},
+            ],
+            "concentration_index": 0.34,
+            "total_parcels_analyzed": 12500,
+        }
+    return {"error": "Unknown test action"}
+
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+
+def search_property(address, state=None, city=None):
+    """Search for property records by address."""
+    if TEST_MODE:
+        return _test_data("search", {"address": address, "state": state})
+    # In production: query county assessor API
+    return {"error": "Production property search requires county-specific API integration",
+            "supported_counties": "Contact project maintainers for county API access"}
+
+
+def owner_history(parcel_id):
+    """Get ownership history for a parcel."""
+    if TEST_MODE:
+        return _test_data("owner_history", {"parcel_id": parcel_id})
+    return {"error": "Production owner history requires county records API"}
+
+
+def portfolio(owner, state=None):
+    """Get all properties owned by an entity."""
+    if TEST_MODE:
+        data = _test_data("portfolio", {"owner": owner})
+        analysis = ask_gatekeeper(
+            f"Analyze this property portfolio for '{owner}': "
+            f"{json.dumps(data['properties'])}. "
+            f"Total value: ${data['total_assessed_value']:,.0f}. "
+            f"What patterns do you see? Are there signs of land banking, "
+            f"speculation, or strategic acquisition?"
+        )
+        if analysis:
+            data["ai_analysis"] = analysis
+        return data
+    return {"error": "Production portfolio search requires county records API"}
+
+
+def shell_detection(owner):
+    """Detect potential shell company indicators for a property owner."""
+    if TEST_MODE:
+        data = _test_data("shell_detection", {"owner": owner})
+        analysis = ask_gatekeeper(
+            f"Evaluate these shell company indicators for '{owner}': "
+            f"{json.dumps(data['indicators'])}. Shell score: {data['shell_score']}. "
+            f"What additional investigation steps would confirm or deny shell company status? "
+            f"What are the likely purposes of using a shell entity for property ownership?"
+        )
+        if analysis:
+            data["ai_analysis"] = analysis
+        return data
+    return {"error": "Production shell detection requires corporate registry API"}
+
+
+def tax_analysis(parcel_id):
+    """Analyze property tax assessment for fairness and abatements."""
+    if TEST_MODE:
+        data = _test_data("tax_analysis", {"parcel_id": parcel_id})
+        analysis = ask_gatekeeper(
+            f"Analyze this property tax situation. Assessed: ${data['assessed_value']:,.0f}, "
+            f"Market estimate: ${data['market_estimate']:,.0f} (ratio: {data['assessment_ratio']:.0%}). "
+            f"Abatements: {json.dumps(data['abatements'])}. "
+            f"Comparables: {json.dumps(data['comparable_properties'])}. "
+            f"Is this property under-assessed? Are the abatements appropriate?"
+        )
+        if analysis:
+            data["ai_analysis"] = analysis
+        return data
+    return {"error": "Production tax analysis requires assessor API"}
+
+
+def concentration(city, state):
+    """Analyze ownership concentration in a geographic area."""
+    if TEST_MODE:
+        data = _test_data("concentration", {"city": city, "state": state})
+        analysis = ask_gatekeeper(
+            f"Analyze property ownership concentration in {city}, {state}. "
+            f"Top owners: {json.dumps(data['top_owners'])}. "
+            f"Concentration index: {data['concentration_index']}. "
+            f"Total parcels: {data['total_parcels_analyzed']}. "
+            f"Is ownership dangerously concentrated? Are there signs of "
+            f"monopolistic land control or political influence through property?"
+        )
+        if analysis:
+            data["ai_analysis"] = analysis
+        return data
+    return {"error": "Production concentration analysis requires assessor API"}
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    except json.JSONDecodeError:
+        input_data = {}
+
+    action = input_data.get("action", "search")
+    actions = {
+        "search": lambda: search_property(
+            input_data.get("address", ""),
+            state=input_data.get("state"),
+            city=input_data.get("city")),
+        "owner_history": lambda: owner_history(input_data.get("parcel_id", "")),
+        "portfolio": lambda: portfolio(
+            input_data.get("owner", ""),
+            state=input_data.get("state")),
+        "shell_detection": lambda: shell_detection(input_data.get("owner", "")),
+        "tax_analysis": lambda: tax_analysis(input_data.get("parcel_id", "")),
+        "concentration": lambda: concentration(
+            input_data.get("city", ""),
+            input_data.get("state", "")),
+    }
+
+    if action in actions:
+        result = actions[action]()
+    else:
+        result = {"error": f"Unknown action: {action}",
+                  "available_actions": list(actions.keys())}
+
+    json.dump(result, sys.stdout, indent=2)
+    print()
+    if isinstance(result, dict) and result.get("error"):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
